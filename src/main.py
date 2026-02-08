@@ -12,7 +12,7 @@ import socket
 import sys
 import webbrowser
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 
@@ -99,6 +99,7 @@ class AriaApplication:
         self.scheduler: Optional[Scheduler] = None
         self.config_watcher: Optional[ConfigWatcher] = None
         self.device_manager: Optional[DevicePairingManager] = None
+        self.self_healing_service: Optional[Any] = None
         self.vector_memory: Optional[VectorMemory] = None
         self.plugin_loader: Optional[PluginLoader] = None
 
@@ -259,6 +260,16 @@ class AriaApplication:
         )
         await self.proactive_engine.start()
 
+        # Self-healing service (monitors logs, auto-fixes any error via patterns + LLM)
+        from src.core.self_healing import SelfHealingService
+        self.self_healing_service = SelfHealingService(
+            event_bus=self.event_bus,
+            check_interval_seconds=self.settings.proactive.self_healing_check_interval_seconds,
+            llm_router=self.llm_router,
+            security_guardian=self.security_guardian,
+        )
+        self.orchestrator.set_self_healing_service(self.self_healing_service)
+
         # Add default morning briefing job if enabled and not exists
         if self.settings.proactive.morning_briefing:
             jobs = self.scheduler.list_jobs()
@@ -306,6 +317,7 @@ class AriaApplication:
         self.app.state.device_manager = self.device_manager
         self.app.state.proactive_engine = self.proactive_engine
         self.app.state.agent_coordinator = self.agent_coordinator
+        self.app.state.user_profile_manager = self.user_profile_manager
 
         logger.info("Aria initialization complete")
 
@@ -544,6 +556,8 @@ class AriaApplication:
         # Start new subsystems
         if self.heartbeat:
             await self.heartbeat.start()
+        if self.self_healing_service and self.settings.proactive.self_healing_enabled:
+            await self.self_healing_service.start()
         # Scheduler auto-starts via heartbeat events — no explicit start needed
         if self.config_watcher:
             await self.config_watcher.start()
@@ -558,9 +572,13 @@ class AriaApplication:
         router_task = asyncio.create_task(self.message_router.start())
 
         # Start web server
+        import os
         web_config = self.settings.channels.web
         port = web_config.port
         host = web_config.host
+        # Dev mode: backend on 8081 so Vite (8080) can proxy /api to us
+        if os.environ.get("ARIA_DEV"):
+            port = 8081
 
         # Find an available port if the configured one is in use
         port = self._find_available_port(host, port)
@@ -576,15 +594,23 @@ class AriaApplication:
         web_task = asyncio.create_task(self.web_server.serve())
 
         dashboard_url = f"http://{host if host != '0.0.0.0' else 'localhost'}:{port}"
-        logger.info(f"Aria is now running on {dashboard_url}")
+        dev_url = "http://localhost:8080"  # Vite dev server (hot reload) on 8080
+        if os.environ.get("ARIA_DEV"):
+            logger.info(f"Backend on port {port} | Frontend: http://localhost:8080 (hot reload)")
+        else:
+            logger.info(f"Aria is now running on {dashboard_url}")
         logger.info("Press Ctrl+C to stop")
 
-        # Open dashboard in browser
+        # Open dashboard: 8080 = Vite dev (hot reload), else built app on backend port
+        url_to_open = dev_url if os.environ.get("ARIA_DEV") else dashboard_url
+        # Brief delay in dev so Vite can start before browser opens
+        if os.environ.get("ARIA_DEV"):
+            await asyncio.sleep(2)
         try:
-            webbrowser.open(dashboard_url)
-            logger.info(f"Opened dashboard in browser: {dashboard_url}")
+            webbrowser.open(url_to_open)
+            logger.info(f"Opened dashboard in browser: {url_to_open}")
         except Exception:
-            logger.info(f"Open the dashboard at: {dashboard_url}")
+            logger.info(f"Open the dashboard at: {url_to_open}")
 
         # Wait for shutdown
         await self.shutdown_event.wait()
@@ -595,6 +621,8 @@ class AriaApplication:
         # Stop new subsystems
         if self.plugin_loader:
             await self.plugin_loader.stop_all()
+        if self.self_healing_service:
+            await self.self_healing_service.stop()
         if self.config_watcher:
             await self.config_watcher.stop()
         # Scheduler has no stop — it's event-driven via heartbeat
@@ -755,13 +783,35 @@ async def main():
         # Initialize
         await app.initialize()
 
-        # Start
+        # Start (blocks until shutdown)
         await app.start()
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     except Exception as e:
         logger.error("Fatal error", error=str(e), exc_info=True)
+        # Self-healing: attempt to fix crashes (e.g. missing deps, config)
+        if app.settings.proactive.self_healing_enabled:
+            try:
+                # Use app's service if ready, else create minimal one for crash handling
+                healer = app.self_healing_service
+                if healer is None:
+                    from src.core.self_healing import SelfHealingService
+                    from src.core.events import get_event_bus
+                    healer = SelfHealingService(
+                    event_bus=get_event_bus(),
+                    llm_router=app.llm_router,
+                    security_guardian=app.security_guardian,
+                )
+                result = await healer.handle_crash(e)
+                if result.get("fixed"):
+                    logger.info(
+                        "Self-healing applied. Please restart Aria.",
+                        fixed=result["fixed"],
+                    )
+                    sys.exit(0)  # Success after fix — user should restart
+            except Exception as heal_err:
+                logger.error("Self-healing failed during crash recovery", error=str(heal_err))
         sys.exit(1)
     finally:
         await app.cleanup()
@@ -942,13 +992,39 @@ def run():
         metavar="ACTION",
         help="Daemon mode: install, uninstall, start, stop, status",
     )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Dev mode: spawn Vite dev server for frontend hot reload (use http://localhost:3000)",
+    )
     args = parser.parse_args()
+
+    # --dev: spawn Vite dev server for hot reload (implies --local to skip Docker)
+    vite_proc = None
+    if args.dev:
+        import os
+        import subprocess
+        os.environ["ARIA_DEV"] = "1"  # Signal to open browser on port 3000
+        args.local = True  # Skip Docker so backend runs
+        frontend_dir = Path(__file__).resolve().parent / "web" / "frontend"
+        if (frontend_dir / "package.json").exists():
+            vite_proc = subprocess.Popen(
+                ["npm", "run", "dev"],
+                cwd=str(frontend_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            logger.info("Vite dev server on 8080 (hot reload) | Backend on 8081")
+            print("\n  Hot reload: http://localhost:8080 (frontend + backend proxy)\n")
 
     if not args.skip_setup and (args.setup or is_first_run()):
         from src.cli.wizard import run_wizard
 
         if not run_wizard():
             sys.exit(0)
+        # Reload settings so deployment_mode from the freshly written config is used
+        from src.utils.config import reload_settings
+        reload_settings()
 
     # --daemon flag: Daemon/service management
     import os
@@ -976,7 +1052,16 @@ def run():
     if not args.local and not os.environ.get("ARIA_IN_CONTAINER"):
         _start_docker_deployment()
 
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    finally:
+        if vite_proc:
+            import subprocess as sp
+            vite_proc.terminate()
+            try:
+                vite_proc.wait(timeout=5)
+            except sp.TimeoutExpired:
+                vite_proc.kill()
 
 
 if __name__ == "__main__":

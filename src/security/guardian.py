@@ -431,6 +431,15 @@ class SecurityGuardian:
         elif action_type in ("calendar_read", "calendar_write"):
             return f"Calendar operation: {tool}"
 
+        elif action_type == "code_edit":
+            edits = details.get("edits", [])
+            if edits:
+                fps = ", ".join(e.get("file_path", "?") for e in edits if isinstance(e, dict))
+            else:
+                fps = details.get("file_path", "unknown")
+            reason = details.get("reason", "")
+            return f"Self-healing code fix: {fps}" + (f" — {reason}" if reason else "")
+
         return f"Action: {action_type} - {tool}"
 
     def get_pending_requests(self, user_id: str | None = None) -> list[ApprovalRequest]:

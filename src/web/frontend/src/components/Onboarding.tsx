@@ -55,7 +55,7 @@ export default function Onboarding() {
 
   if (isLoading || !config) {
     return (
-      <div className="min-h-screen bg-[#0a1120] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
         <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
       </div>
     );
@@ -86,19 +86,20 @@ export default function Onboarding() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a1120] flex items-center justify-center p-6">
+    <div className="min-h-screen flex items-center justify-center p-6" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <div className="w-full max-w-2xl">
         <div className="text-center mb-10">
           <div className="w-14 h-14 mx-auto rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center mb-4">
             <Bot className="w-7 h-7 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white">Welcome to Aria</h1>
-          <p className="text-slate-500 mt-1">Set up your assistant in a few steps</p>
+          <h1 className="text-2xl font-bold text-theme-primary">Welcome to Aria</h1>
+          <p className="text-theme-secondary mt-1">Set up your assistant in a few steps</p>
           <div className="flex justify-center gap-2 mt-4">
             {[1, 2].map((s) => (
               <div
                 key={s}
-                className={`w-2 h-2 rounded-full ${step === s ? 'bg-blue-500' : 'bg-slate-600'}`}
+                className={`w-2 h-2 rounded-full ${step === s ? 'bg-blue-500' : ''}`}
+                style={step !== s ? { backgroundColor: 'var(--text-secondary)' } : undefined}
               />
             ))}
           </div>
@@ -109,26 +110,26 @@ export default function Onboarding() {
             <>
               <div className="flex items-center gap-3 mb-4">
                 <Puzzle className="w-5 h-5 text-blue-400" />
-                <h2 className="text-lg font-semibold text-white">Select skills</h2>
+                <h2 className="text-lg font-semibold text-theme-primary">Select skills</h2>
               </div>
-              <p className="text-sm text-slate-400 mb-4">Choose which capabilities Aria should have.</p>
+              <p className="text-sm text-theme-secondary mb-4">Choose which capabilities Aria should have.</p>
               <div className="space-y-4 max-h-[400px] overflow-y-auto">
                 {Object.entries(SKILL_GROUPS).map(([groupKey, { label, skills: skillList }]) => (
                   <div key={groupKey}>
-                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">{label}</p>
+                    <p className="text-xs font-medium text-theme-secondary uppercase tracking-wider mb-2">{label}</p>
                     <div className="flex flex-wrap gap-2">
                       {skillList.map((name) => (
                         <label
                           key={name}
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800/50 border border-white/[0.06] cursor-pointer hover:border-blue-500/30"
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg card-theme cursor-pointer hover:border-blue-500/30 border-theme"
                         >
                           <input
                             type="checkbox"
                             checked={skills[name] ?? false}
                             onChange={(e) => setSkills((p) => ({ ...p, [name]: e.target.checked }))}
-                            className="rounded bg-slate-700 text-blue-600"
+                            className="rounded border border-theme bg-theme-muted text-blue-600"
                           />
-                          <span className="text-sm text-slate-300 capitalize">{name.replace(/_/g, ' ')}</span>
+                          <span className="text-sm text-theme-primary capitalize">{name.replace(/_/g, ' ')}</span>
                         </label>
                       ))}
                     </div>
@@ -136,7 +137,7 @@ export default function Onboarding() {
                 ))}
               </div>
               <div className="flex justify-between mt-6">
-                <button onClick={handleSkip} className="text-slate-500 hover:text-slate-300 text-sm">
+                <button onClick={handleSkip} className="text-theme-secondary hover:text-theme-primary text-sm">
                   Skip for now
                 </button>
                 <button
@@ -155,9 +156,9 @@ export default function Onboarding() {
             <>
               <div className="flex items-center gap-3 mb-4">
                 <Key className="w-5 h-5 text-blue-400" />
-                <h2 className="text-lg font-semibold text-white">Integrations</h2>
+                <h2 className="text-lg font-semibold text-theme-primary">Integrations</h2>
               </div>
-              <p className="text-sm text-slate-400 mb-4">Add API keys for Notion, Todoist, Linear, or Spotify.</p>
+              <p className="text-sm text-theme-secondary mb-4">Add API keys for Notion, Todoist, Linear, or Spotify.</p>
               <div className="space-y-4">
                 {(['notion', 'todoist', 'linear'] as const).map((name) => (
                   <div key={name} className="flex items-center gap-4">
@@ -171,9 +172,9 @@ export default function Onboarding() {
                             [name]: { ...p[name], enabled: e.target.checked },
                           }))
                         }
-                        className="rounded bg-slate-700 text-blue-600"
+                        className="rounded border border-theme bg-theme-muted text-blue-600"
                       />
-                      <span className="text-sm text-white capitalize">{name}</span>
+                      <span className="text-sm text-theme-primary capitalize">{name}</span>
                     </label>
                     <input
                       type="password"
@@ -185,7 +186,7 @@ export default function Onboarding() {
                           [name]: { ...p[name], api_key: e.target.value },
                         }))
                       }
-                      className="flex-1 px-3 py-2 rounded-lg bg-slate-800/60 border border-white/[0.06] text-sm text-slate-200 placeholder-slate-500"
+                      className="flex-1 px-3 py-2 rounded-lg glass-input text-sm"
                     />
                   </div>
                 ))}
@@ -200,9 +201,9 @@ export default function Onboarding() {
                           spotify: { ...p.spotify, enabled: e.target.checked },
                         }))
                       }
-                      className="rounded bg-slate-700 text-blue-600"
+                      className="rounded border border-theme bg-theme-muted text-blue-600"
                     />
-                    <span className="text-sm text-white">Spotify</span>
+                    <span className="text-sm text-theme-primary">Spotify</span>
                   </label>
                   <input
                     type="password"
@@ -214,7 +215,7 @@ export default function Onboarding() {
                         spotify: { ...p.spotify, client_id: e.target.value },
                       }))
                     }
-                    className="flex-1 px-3 py-2 rounded-lg bg-slate-800/60 border border-white/[0.06] text-sm placeholder-slate-500"
+                    className="flex-1 px-3 py-2 rounded-lg glass-input text-sm"
                   />
                   <input
                     type="password"
@@ -226,19 +227,19 @@ export default function Onboarding() {
                         spotify: { ...p.spotify, client_secret: e.target.value },
                       }))
                     }
-                    className="flex-1 px-3 py-2 rounded-lg bg-slate-800/60 border border-white/[0.06] text-sm placeholder-slate-500"
+                    className="flex-1 px-3 py-2 rounded-lg glass-input text-sm"
                   />
                 </div>
               </div>
               <div className="flex justify-between mt-6">
                 <button
                   onClick={() => setStep(1)}
-                  className="text-slate-400 hover:text-slate-200 flex items-center gap-1"
+                  className="text-theme-secondary hover:text-theme-primary flex items-center gap-1"
                 >
                   <ArrowLeft className="w-4 h-4" /> Back
                 </button>
                 <div className="flex gap-2">
-                  <button onClick={handleSkip} className="px-4 py-2.5 text-slate-400 hover:text-white text-sm">
+                  <button onClick={handleSkip} className="px-4 py-2.5 text-theme-secondary hover:text-theme-primary text-sm">
                     Skip
                   </button>
                   <button
@@ -255,7 +256,7 @@ export default function Onboarding() {
           )}
         </div>
 
-        <p className="text-center text-slate-500 text-xs mt-4">
+        <p className="text-center text-theme-secondary text-xs mt-4">
           You can always change these in Settings.
         </p>
       </div>

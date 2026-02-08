@@ -84,6 +84,9 @@ class Orchestrator:
         # Skill generator for auto-learning new capabilities
         self._skill_generator: "SkillGenerator | None" = None
 
+        # Self-healing service (log monitoring, auto-fix)
+        self._self_healing_service: Any = None
+
         # User profile, entity extraction, summarizer (Phase 1)
         self._user_profile_manager: Any = None
         self._entity_extractor: Any = None
@@ -99,6 +102,10 @@ class Orchestrator:
     def set_skill_generator(self, generator: "SkillGenerator | None") -> None:
         """Set the skill generator for auto-learning new capabilities."""
         self._skill_generator = generator
+
+    def set_self_healing_service(self, service: Any) -> None:
+        """Set the self-healing service for log monitoring and auto-fix."""
+        self._self_healing_service = service
 
     def set_user_profile_manager(self, pm: Any) -> None:
         self._user_profile_manager = pm
@@ -907,6 +914,23 @@ Just ask me what you need help with!"""
         """Get list of available tools for the LLM."""
         tools: list[Tool] = []
 
+        # Add check_logs_and_heal tool when self-healing is enabled
+        if (
+            self._self_healing_service
+            and self.settings.proactive.self_healing_enabled
+        ):
+            tools.append(
+                Tool(
+                    name="check_logs_and_heal",
+                    description=(
+                        "Check recent logs for errors and automatically fix common issues "
+                        "(e.g. missing ChromaDB, Whisper, vite.svg). Use when the user reports "
+                        "errors, something is broken, or asks to fix/diagnose issues."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                )
+            )
+
         # Add create_skill tool when learning is enabled
         if (
             self._skill_generator
@@ -1103,6 +1127,10 @@ Just ask me what you need help with!"""
         if tool_name == "create_skill":
             return await self._execute_create_skill(arguments)
 
+        # Handle check_logs_and_heal (self-healing)
+        if tool_name == "check_logs_and_heal":
+            return await self._execute_check_logs_and_heal()
+
         if not self._skill_registry:
             raise RuntimeError("Skill registry not available")
 
@@ -1180,6 +1208,41 @@ Just ask me what you need help with!"""
 
         except Exception as e:
             logger.error("create_skill failed", error=str(e))
+            return {"success": False, "error": str(e)}
+
+    async def _execute_check_logs_and_heal(self) -> dict[str, Any]:
+        """Execute the check_logs_and_heal tool to scan logs and fix issues."""
+        if not self._self_healing_service:
+            return {"success": False, "error": "Self-healing service not available"}
+        try:
+            result = await self._self_healing_service.check_and_heal()
+            fixed = result.get("fixed", [])
+            failed = result.get("failed", [])
+            detected = result.get("detected", [])
+            if fixed:
+                return {
+                    "success": True,
+                    "message": f"Fixed {len(fixed)} issue(s): " + "; ".join(fixed),
+                    "fixed": fixed,
+                    "failed": failed,
+                    "detected": detected,
+                }
+            if failed:
+                return {
+                    "success": False,
+                    "message": "Could not fix: " + "; ".join(failed),
+                    "failed": failed,
+                    "detected": detected,
+                }
+            if detected:
+                return {
+                    "success": True,
+                    "message": "No new issues to fix (some were already attempted).",
+                    "detected": detected,
+                }
+            return {"success": True, "message": "No errors detected in recent logs."}
+        except Exception as e:
+            logger.error("check_logs_and_heal failed", error=str(e))
             return {"success": False, "error": str(e)}
 
     def _sanitize_response(self, content: str) -> str:
@@ -1261,6 +1324,8 @@ Just ask me what you need help with!"""
         # Special tools
         if tool_lower == "create_skill":
             return "skill_creation"
+        if tool_lower == "check_logs_and_heal":
+            return "shell_commands"  # runs pip install, file ops
 
         # Extract skill prefix (e.g. "shell" from "shell.execute")
         skill = tool_lower.split(".")[0] if "." in tool_lower else tool_lower

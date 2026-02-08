@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import { Send, Trash2, Loader2, Bot, User, Sparkles, Mic, MicOff, Volume2 } from 'lucide-react';
-import { chatApi, transcribeApi } from '../services/api';
+import { chatApi, transcribeApi, userApi, logApi } from '../services/api';
+import { useAuthStore } from '../hooks/useAuth';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -15,17 +16,47 @@ export default function Chat() {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
+  const [proactiveAlert, setProactiveAlert] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const queryClient = useQueryClient();
+  const { token } = useAuthStore();
+
+  // Fetch user profile for personalized greeting
+  const { data: profile } = useQuery({
+    queryKey: ['userProfile'],
+    queryFn: async () => {
+      const res = await userApi.getProfile();
+      return res.data as { name?: string; preferred_name?: string };
+    },
+  });
+
+  // WebSocket: listen for proactive alerts (self-healing, errors)
+  useEffect(() => {
+    if (!token) return;
+    const wsUrl = `${(window.location.protocol === 'https:' ? 'wss:' : 'ws:')}//${window.location.host}/ws/${token}`;
+    const ws = new WebSocket(wsUrl);
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'proactive_alert' && data.message) {
+          setProactiveAlert(data.message);
+          queryClient.invalidateQueries({ queryKey: ['chatHistory'] });
+        }
+      } catch {
+        // ignore
+      }
+    };
+    return () => ws.close();
+  }, [token, queryClient]);
 
   const startRecording = useCallback(async () => {
     try {
+      logApi.event('mic_start', {}).catch(() => {});
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // Pick a supported mime type (Safari doesn't support webm)
       const mimeTypes = ['audio/webm', 'audio/mp4', 'audio/ogg', 'audio/wav', ''];
       const mimeType = mimeTypes.find((t) => !t || MediaRecorder.isTypeSupported(t)) || '';
       const ext = mimeType.includes('mp4') ? 'mp4'
@@ -43,10 +74,12 @@ export default function Chat() {
       };
 
       mediaRecorder.onstop = async () => {
+        logApi.event('mic_stop', { mimeType, chunkCount: chunksRef.current.length }).catch(() => {});
         stream.getTracks().forEach(track => track.stop());
         const blob = new Blob(chunksRef.current, { type: mimeType || 'audio/webm' });
         setIsTranscribing(true);
         setMicError(null);
+        logApi.event('transcription_start', { format: ext, blobSize: blob.size }).catch(() => {});
         try {
           const reader = new FileReader();
           reader.onloadend = async () => {
@@ -54,18 +87,23 @@ export default function Chat() {
             try {
               const res = await transcribeApi.transcribe(base64, ext);
               if (res.data.success && res.data.text) {
+                logApi.event('transcription_success', { textLen: res.data.text?.length }).catch(() => {});
                 setInput((prev) => prev + (prev ? ' ' : '') + res.data.text);
                 inputRef.current?.focus();
               } else {
+                logApi.event('transcription_failed', { error: res.data.error }).catch(() => {});
                 setMicError(res.data.error || 'Transcription failed');
               }
             } catch (err: any) {
-              setMicError(err?.response?.data?.detail || 'Transcription service unavailable');
+              const errMsg = err?.response?.data?.detail || 'Transcription service unavailable';
+              logApi.event('transcription_failed', { error: errMsg, network: true }).catch(() => {});
+              setMicError(errMsg);
             }
             setIsTranscribing(false);
           };
           reader.readAsDataURL(blob);
-        } catch {
+        } catch (e) {
+          logApi.event('transcription_failed', { error: 'Failed to process audio', detail: String(e) }).catch(() => {});
           setIsTranscribing(false);
           setMicError('Failed to process audio');
         }
@@ -73,7 +111,8 @@ export default function Chat() {
 
       mediaRecorder.start();
       setIsRecording(true);
-    } catch {
+    } catch (e) {
+      logApi.event('mic_denied', { error: 'Microphone access denied' }).catch(() => {});
       setMicError('Microphone access denied. Check browser permissions.');
     }
   }, []);
@@ -85,13 +124,14 @@ export default function Chat() {
     }
   }, [isRecording]);
 
-  // Fetch chat history
+  // Fetch chat history (no staleTime so we get fresh data after restart)
   const { data: history, isLoading } = useQuery({
     queryKey: ['chatHistory'],
     queryFn: async () => {
       const response = await chatApi.getHistory();
       return response.data.messages as Message[];
     },
+    staleTime: 0,
   });
 
   // Send message mutation
@@ -158,14 +198,14 @@ export default function Chat() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between bg-[#0a1120]/80 backdrop-blur-sm">
+      <div className="px-6 py-4 border-b flex items-center justify-between backdrop-blur-sm border-theme" style={{ backgroundColor: 'color-mix(in srgb, var(--bg-primary) 80%, transparent)' }}>
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-md shadow-blue-500/15">
             <Bot className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-base font-semibold text-white tracking-tight">Chat with Aria</h1>
-            <p className="text-[11px] text-slate-500">AI Assistant</p>
+            <h1 className="text-base font-semibold tracking-tight text-theme-primary">Chat with Aria</h1>
+            <p className="text-[11px] text-theme-secondary">AI Assistant</p>
           </div>
         </div>
         <button
@@ -182,11 +222,23 @@ export default function Chat() {
       <div className="flex-1 overflow-y-auto px-6 py-6">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
-            <Loader2 className="w-6 h-6 animate-spin text-slate-600" />
+            <Loader2 className="w-6 h-6 animate-spin text-theme-secondary" />
           </div>
         ) : (
           <div className="space-y-5 max-w-3xl mx-auto">
-            {/* Aria intro message when chat is empty */}
+            {/* Proactive alert (self-healing, errors) */}
+            {proactiveAlert && (
+              <div className="flex gap-3 animate-fade-in justify-start">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center flex-shrink-0 mt-1">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="max-w-[75%] px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-amber-200/90 text-sm">{proactiveAlert}</p>
+                  <button onClick={() => setProactiveAlert(null)} className="mt-2 text-xs text-amber-400/70 hover:text-amber-400">Dismiss</button>
+                </div>
+              </div>
+            )}
+            {/* Aria intro: only show "What should I call you?" when no name; else "Hi [Name], welcome back!" */}
             {history?.length === 0 && (
               <div className="flex gap-3 animate-fade-in justify-start">
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0 mt-1 shadow-md shadow-blue-500/15">
@@ -194,7 +246,13 @@ export default function Chat() {
                 </div>
                 <div className="max-w-[75%] px-4 py-3 message-assistant">
                   <div className="markdown-content">
-                    <p>Hey — I'm <strong>Aria</strong>. What should I call you, and what can I help with?</p>
+                    <p>
+                      {profile?.name || profile?.preferred_name ? (
+                        <>Hi <strong>{profile.name || profile.preferred_name}</strong>, welcome back! What can I help with?</>
+                      ) : (
+                        <>Hey — I'm <strong>Aria</strong>. What should I call you, and what can I help with?</>
+                      )}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -229,8 +287,8 @@ export default function Chat() {
                 </div>
 
                 {message.role === 'user' && (
-                  <div className="w-8 h-8 rounded-lg bg-slate-800/60 border border-white/[0.06] flex items-center justify-center flex-shrink-0 mt-1">
-                    <User className="w-4 h-4 text-slate-400" />
+                  <div className="w-8 h-8 rounded-lg card-theme flex items-center justify-center flex-shrink-0 mt-1 border-theme">
+                    <User className="w-4 h-4 text-theme-secondary" />
                   </div>
                 )}
               </div>
@@ -257,7 +315,7 @@ export default function Chat() {
       </div>
 
       {/* Input */}
-      <div className="px-6 py-4 border-t border-white/[0.06] bg-[#0a1120]/80 backdrop-blur-sm">
+      <div className="px-6 py-4 border-t border-theme backdrop-blur-sm" style={{ backgroundColor: 'color-mix(in srgb, var(--bg-primary) 80%, transparent)' }}>
         {micError && (
           <div className="max-w-3xl mx-auto mb-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center justify-between">
             <span>{micError}</span>
@@ -282,8 +340,8 @@ export default function Chat() {
               isRecording
                 ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
                 : isTranscribing
-                  ? 'bg-slate-700 text-slate-400'
-                  : 'bg-slate-800/60 hover:bg-slate-700/60 text-slate-300 border border-white/[0.06]'
+                  ? 'bg-theme-muted text-theme-secondary'
+                  : 'btn-theme-secondary'
             }`}
             title={isRecording ? 'Stop recording' : 'Voice input'}
           >

@@ -279,6 +279,8 @@ class ProactiveConfig(BaseModel):
     """Proactive intelligence configuration."""
 
     enabled: bool = True
+    self_healing_enabled: bool = True
+    self_healing_check_interval_seconds: int = 10
     morning_briefing: bool = True
     briefing_time: str = "08:00"
     briefing_channel: str = ""

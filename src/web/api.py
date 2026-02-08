@@ -175,6 +175,41 @@ def create_app(
     async def get_me(user_id: str = Depends(get_current_user)):
         return {"user_id": user_id}
 
+    @api.post("/log/event")
+    async def log_client_event(
+        request: Request,
+        user_id: str = Depends(get_current_user),
+    ):
+        """Log client-side events (mic, transcription, etc.) for debugging and self-healing."""
+        try:
+            body = await request.json()
+            event = body.get("event", "unknown")
+            details = body.get("details", {})
+            if not isinstance(details, dict):
+                details = {"payload": details}
+            # Log failures at WARNING so self-healing can detect them
+            failure_events = {"transcription_failed", "mic_denied", "mic_error"}
+            if event in failure_events:
+                logger.warning("client_event", event_type=event, user_id=user_id, details=details)
+            else:
+                logger.info("client_event", event_type=event, user_id=user_id, details=details)
+            return {"logged": True}
+        except Exception as e:
+            logger.warning("log_event failed", error=str(e))
+            return {"logged": False}
+
+    @api.get("/user/profile")
+    async def get_user_profile(user_id: str = Depends(get_current_user)):
+        """Get user profile (name, etc.) for personalized greeting."""
+        if hasattr(app.state, "user_profile_manager") and app.state.user_profile_manager:
+            profile = app.state.user_profile_manager.get_profile(user_id)
+            return {
+                "user_id": user_id,
+                "name": profile.name or profile.preferred_name or "",
+                "preferred_name": profile.preferred_name or "",
+            }
+        return {"user_id": user_id, "name": "", "preferred_name": ""}
+
     # -- Chat --
 
     @api.post("/chat/message")
@@ -248,6 +283,7 @@ def create_app(
                     "id": r.id,
                     "action_type": r.action_type,
                     "description": r.description,
+                    "details": r.details,
                     "user_id": r.user_id,
                     "channel": r.channel,
                     "created_at": r.created_at.isoformat(),
@@ -696,7 +732,8 @@ def create_app(
             }
             status_data["context"] = app.state.orchestrator.context_manager.get_stats()
             status_data["queue"] = app.state.orchestrator.message_router.get_stats()
-            status_data["rag"] = app.state.orchestrator.rag_pipeline.get_stats()
+            if app.state.orchestrator._rag_pipeline:
+                status_data["rag"] = app.state.orchestrator._rag_pipeline.get_stats()
         if app.state.skill_registry:
             status_data["skills"] = app.state.skill_registry.get_stats()
         if app.state.security_guardian:
@@ -1254,26 +1291,34 @@ def create_app(
     async def transcribe_audio(request: Request, user_id: str = Depends(get_current_user)):
         """Transcribe uploaded audio using STT skill."""
         if not app.state.skill_registry:
+            logger.warning("transcribe: skill_registry not available")
             raise HTTPException(status_code=503, detail="Skill registry not available")
-        import base64
         body = await request.json()
         audio_data = body.get("audio")  # base64 encoded
         audio_format = body.get("format", "webm")  # webm, mp4, ogg, wav
         if not audio_data:
+            logger.warning("transcribe: no audio data provided")
             raise HTTPException(status_code=400, detail="No audio data provided")
-        result = await app.state.skill_registry.execute(
-            "stt", "transcribe_bytes", audio_data=audio_data, format=audio_format
-        )
+        audio_len = len(audio_data) if audio_data else 0
+        logger.info("transcribe: starting", format=audio_format, audio_base64_len=audio_len, user_id=user_id)
+        try:
+            result = await app.state.skill_registry.execute(
+                "stt", "transcribe_bytes", audio_data=audio_data, format=audio_format
+            )
+        except Exception as e:
+            logger.error("transcribe: failed", error=str(e), exc_info=True)
+            return {"text": "", "success": False, "error": str(e)}
         if result.success:
-            # STT skill returns {"text": "...", "language": "...", "segments": [...]}
-            # Extract just the text string for the frontend
             text = result.output
             if isinstance(text, dict):
                 text = text.get("text", str(text))
             elif not isinstance(text, str):
                 text = str(text)
+            logger.info("transcribe: success", text_len=len(text), user_id=user_id)
             return {"text": text, "success": True}
-        return {"text": "", "success": False, "error": result.error}
+        error_msg = result.error or "Transcription failed"
+        logger.warning("transcribe: STT returned error", error=error_msg, user_id=user_id)
+        return {"text": "", "success": False, "error": error_msg}
 
     # -- WhatsApp Bridge --
 
@@ -1792,6 +1837,41 @@ def create_app(
     # ── Register API router ───────────────────────────────────────────────
 
     app.include_router(api)
+
+    # ── WebSocket routes ─────────────────────────────────────────────────
+
+    add_websocket_routes(app)
+
+    # ── Subscribe to proactive alerts (self-healing, errors) ────────────────
+
+    @app.on_event("startup")
+    async def subscribe_proactive_alerts():
+        from ..core.events import get_event_bus
+        bus = get_event_bus()
+
+        async def on_self_healing(event: Any) -> None:
+            data = event.data if hasattr(event, "data") else event
+            msg = data.get("message", "Fixed an issue") or f"Self-healing: {data.get('action', 'fixed')}"
+            await ws_manager.broadcast({
+                "type": "proactive_alert",
+                "message": msg,
+                "source": "self_healing",
+            })
+
+        async def on_proactive_alert(event: Any) -> None:
+            data = event.data if hasattr(event, "data") else event
+            user_id = data.get("user_id") or "admin"
+            msg = data.get("message", "")
+            if msg:
+                await ws_manager.send_to_user(user_id, {
+                    "type": "proactive_alert",
+                    "message": msg,
+                    "source": "proactive",
+                })
+
+        bus.on("self_healing_fixed", on_self_healing)
+        bus.on("proactive_alert", on_proactive_alert)
+        logger.info("Subscribed to proactive alerts (self-healing, proactive)")
 
     # ── Serve built React frontend ────────────────────────────────────────
 

@@ -211,9 +211,10 @@ class ProfileManager:
                     "send_messages",
                     "send_emails",
                     "web_requests",
-                    "calendar_read",
-                    "calendar_write",
-                    "skill_creation",
+                "calendar_read",
+                "calendar_write",
+                "skill_creation",
+                "code_edit",
                 ]
             },
         )
@@ -248,6 +249,7 @@ class ProfileManager:
                 "calendar_read": ActionRule(action=ActionResult.AUTO),
                 "calendar_write": ActionRule(action=ActionResult.NOTIFY),
                 "skill_creation": ActionRule(action=ActionResult.APPROVE),
+                "code_edit": ActionRule(action=ActionResult.APPROVE),
             },
         )
 
@@ -275,6 +277,7 @@ class ProfileManager:
                 "calendar_read": ActionRule(action=ActionResult.AUTO),
                 "calendar_write": ActionRule(action=ActionResult.AUTO),
                 "skill_creation": ActionRule(action=ActionResult.NOTIFY),
+                "code_edit": ActionRule(action=ActionResult.APPROVE),
             },
         )
 

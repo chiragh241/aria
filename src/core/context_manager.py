@@ -211,11 +211,11 @@ class ContextManager:
         self._persist_dir = Path(self.settings.aria.data_dir).expanduser() / "conversations"
         self._persist_dir.mkdir(parents=True, exist_ok=True)
 
+        # System prompt template (must exist before loading persisted contexts)
+        self._system_prompt = self._build_system_prompt()
+
         # Load persisted conversations on startup
         self._load_persisted_contexts()
-
-        # System prompt template
-        self._system_prompt = self._build_system_prompt()
 
     def set_summarizer(self, summarizer: Any) -> None:
         """Set the conversation summarizer for auto-summarize on trim."""

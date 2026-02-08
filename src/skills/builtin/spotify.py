@@ -43,7 +43,7 @@ class SpotifySkill(BaseSkill):
         self.register_capability(
             name="search",
             description="Search for tracks or playlists",
-            parameters={"type": "object", "properties": {"query": {"type": "string"}, "type": {"type": "string", "enum": ["track", "playlist", "album"]}}}),
+            parameters={"type": "object", "properties": {"query": {"type": "string"}, "type": {"type": "string", "enum": ["track", "playlist", "album"]}}},
         )
 
     async def execute(self, capability: str, **kwargs: Any) -> SkillResult:

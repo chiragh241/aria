@@ -64,20 +64,20 @@ export default function Layout() {
   };
 
   return (
-    <div className="flex h-screen bg-[#0a1120]">
+    <div className="flex h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
       {/* Sidebar */}
       <aside className="w-[260px] glass-sidebar flex flex-col flex-shrink-0">
         {/* Logo */}
-        <div className="p-5 border-b border-white/[0.06]">
+        <div className="p-5 border-b border-theme">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 via-blue-600 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
               <Bot className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-[15px] font-bold text-white tracking-tight">Aria</h1>
+              <h1 className="text-[15px] font-bold tracking-tight text-theme-primary">Aria</h1>
               <div className="flex items-center gap-1.5">
-                <div className={isHealthy ? 'status-online' : 'w-2 h-2 bg-slate-600 rounded-full'} />
-                <p className="text-[11px] text-slate-500">
+                <div className={isHealthy ? 'status-online' : 'w-2 h-2 rounded-full'} style={!isHealthy ? { backgroundColor: 'var(--text-secondary)' } : undefined} />
+                <p className="text-[11px] text-theme-secondary">
                   {isHealthy ? 'Online' : 'Connecting...'}
                 </p>
               </div>
@@ -87,7 +87,7 @@ export default function Layout() {
 
         {/* Navigation */}
         <nav className="flex-1 p-3 space-y-0.5 mt-1">
-          <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest px-3 mb-2">
+          <p className="text-[10px] font-semibold uppercase tracking-widest px-3 mb-2 text-theme-secondary">
             Navigation
           </p>
           {navItems.map((item) => {
@@ -100,7 +100,7 @@ export default function Layout() {
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 ${
                   isActive
                     ? 'bg-gradient-to-r from-blue-600/20 to-blue-500/10 text-blue-400 border border-blue-500/20 shadow-sm shadow-blue-500/5'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                    : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-hover'
                 }`}
               >
                 <item.icon className={`w-[18px] h-[18px] ${isActive ? 'text-blue-400' : ''}`} />
@@ -117,8 +117,8 @@ export default function Layout() {
         <div className="mx-3 mb-3">
           <div className="glass-card p-3">
             <div className="flex items-center gap-2 text-xs">
-              <Activity className="w-3.5 h-3.5 text-slate-500" />
-              <span className="text-slate-500">System</span>
+              <Activity className="w-3.5 h-3.5 text-theme-secondary" />
+              <span className="text-theme-secondary">System</span>
               <span className={`ml-auto text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
                 isHealthy
                   ? 'bg-green-500/10 text-green-400'
@@ -132,10 +132,10 @@ export default function Layout() {
 
         {/* Theme toggle */}
         <div className="px-3 py-2 flex items-center justify-between">
-          <span className="text-xs text-slate-500">Theme</span>
+          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Theme</span>
           <button
             onClick={() => setTheme(resolved === 'dark' ? 'light' : 'dark')}
-            className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] transition-all"
+            className="p-2 rounded-lg text-theme-secondary hover:text-theme-primary hover:bg-theme-hover transition-all"
             title={`Switch to ${resolved === 'dark' ? 'light' : 'dark'} mode`}
           >
             {resolved === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -143,7 +143,7 @@ export default function Layout() {
         </div>
 
         {/* User section */}
-        <div className="p-3 border-t border-white/[0.06]">
+        <div className="p-3 border-t border-theme">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-700 to-slate-600 flex items-center justify-center flex-shrink-0">
@@ -152,13 +152,13 @@ export default function Layout() {
                 </span>
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-200 truncate">{user}</p>
-                <p className="text-[10px] text-slate-600">Administrator</p>
+                <p className="text-sm font-medium truncate text-theme-primary">{user}</p>
+                <p className="text-[10px] text-theme-secondary">Administrator</p>
               </div>
             </div>
             <button
               onClick={handleLogout}
-              className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+              className="p-2 text-theme-secondary hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
               title="Logout"
             >
               <LogOut className="w-4 h-4" />
@@ -168,7 +168,7 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto bg-[#0a1120]">
+      <main className="flex-1 overflow-auto" style={{ backgroundColor: 'var(--bg-primary)' }}>
         <Outlet />
       </main>
     </div>

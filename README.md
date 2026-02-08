@@ -66,6 +66,20 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
    ollama pull llama3.2:8b
    ```
 
+7. **(Optional) Mic/voice transcription**: Requires `openai-whisper` and `ffmpeg`:
+   ```bash
+   pip install openai-whisper
+   # ffmpeg: brew install ffmpeg (Mac) or apt install ffmpeg (Linux)
+   ```
+   First mic use downloads the Whisper model (~150MB for "base").
+
+### Troubleshooting
+
+- **"Transcription failed"**: Install `openai-whisper` and `ffmpeg`. Grant browser mic permission.
+- **"ChromaDB not installed"**: Reinstall dependencies: `pip install -e .` or `uv pip install -e .`
+- **vite.svg 404**: Rebuild the frontend: `cd src/web/frontend && npm run build`
+- **Self-healing not detecting errors**: It reads `data/logs/aria.log` every 10s. Terminal-only output (e.g. uvicorn access logs) may not be in the log file. Ask "check logs and fix" to trigger immediately.
+
 ### Running
 
 **Development mode**:
@@ -73,9 +87,11 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
 # Terminal 1: Start backend
 python -m src.main
 
-# Terminal 2: Start frontend dev server
-cd src/web/frontend
-npm run dev
+# Hot reload on 8080: run with --dev (Vite on 8080, backend on 8081)
+python -m src.main --dev
+
+# After frontend changes without --dev: rebuild
+cd src/web/frontend && npm run build
 ```
 
 **With Docker**:

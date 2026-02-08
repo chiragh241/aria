@@ -47,6 +47,20 @@ const skillIcons: Record<string, { icon: string; gradient: string }> = {
   image:       { icon: '🖼️', gradient: 'from-violet-500/15 to-violet-500/5' },
   video:       { icon: '🎬', gradient: 'from-red-500/15 to-red-500/5' },
   documents:   { icon: '📄', gradient: 'from-emerald-500/15 to-emerald-500/5' },
+  memory:      { icon: '🧠', gradient: 'from-indigo-500/15 to-indigo-500/5' },
+  weather:     { icon: '🌤️', gradient: 'from-sky-500/15 to-sky-500/5' },
+  news:        { icon: '📰', gradient: 'from-amber-600/15 to-amber-600/5' },
+  finance:     { icon: '📈', gradient: 'from-lime-500/15 to-lime-500/5' },
+  contacts:    { icon: '👥', gradient: 'from-fuchsia-500/15 to-fuchsia-500/5' },
+  tracking:    { icon: '📦', gradient: 'from-rose-500/15 to-rose-500/5' },
+  home:        { icon: '🏠', gradient: 'from-amber-500/15 to-amber-500/5' },
+  webhook:     { icon: '🔗', gradient: 'from-slate-500/15 to-slate-500/5' },
+  agent:       { icon: '🤖', gradient: 'from-cyan-600/15 to-cyan-600/5' },
+  research:    { icon: '🔍', gradient: 'from-blue-600/15 to-blue-600/5' },
+  notion:      { icon: '📝', gradient: 'from-slate-600/15 to-slate-600/5' },
+  todoist:     { icon: '✅', gradient: 'from-green-600/15 to-green-600/5' },
+  linear:      { icon: '📋', gradient: 'from-violet-600/15 to-violet-600/5' },
+  spotify:     { icon: '🎵', gradient: 'from-green-500/15 to-green-500/5' },
 };
 
 const defaultSkillIcon = { icon: '⚡', gradient: 'from-blue-500/15 to-blue-500/5' };
@@ -110,8 +124,8 @@ function SkillCredentialsForm({ skillName }: { skillName: string }) {
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 py-2">
-        <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />
-        <span className="text-xs text-slate-500">Loading credentials...</span>
+        <Loader2 className="w-3.5 h-3.5 animate-spin text-theme-secondary" />
+        <span className="text-xs text-theme-secondary">Loading credentials...</span>
       </div>
     );
   }
@@ -122,11 +136,11 @@ function SkillCredentialsForm({ skillName }: { skillName: string }) {
 
   return (
     <div className="mt-4 space-y-3">
-      <h4 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Credentials</h4>
+      <h4 className="text-[11px] font-semibold text-theme-secondary uppercase tracking-wider">Credentials</h4>
 
       {credData.fields.map((field) => (
         <div key={field.key}>
-          <label className="block text-[11px] text-slate-400 mb-1">
+          <label className="block text-[11px] text-theme-secondary mb-1">
             {field.label}
             {field.is_set && (
               <span className="ml-2 text-green-400/80 text-[10px]">configured</span>
@@ -144,7 +158,7 @@ function SkillCredentialsForm({ skillName }: { skillName: string }) {
               <button
                 type="button"
                 onClick={() => setShowSecrets({ ...showSecrets, [field.key]: !showSecrets[field.key] })}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-theme-secondary hover:text-slate-300"
               >
                 {showSecrets[field.key] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
               </button>
@@ -269,7 +283,7 @@ export default function Skills() {
         <div className="glass-card p-8 text-center mb-6">
           <AlertCircle className="w-10 h-10 mx-auto text-red-400/60 mb-3" />
           <p className="text-red-400 font-medium mb-1">Failed to load skills</p>
-          <p className="text-sm text-slate-500 mb-4">
+          <p className="text-sm text-theme-secondary mb-4">
             {(error as any)?.response?.status === 401
               ? 'Session expired. Please log in again.'
               : (error as any)?.message || 'Could not connect to the server.'}
@@ -286,7 +300,7 @@ export default function Skills() {
       {/* Loading state */}
       {isLoading && (
         <div className="flex items-center justify-center py-16">
-          <Loader2 className="w-6 h-6 animate-spin text-slate-600" />
+          <Loader2 className="w-6 h-6 animate-spin text-theme-secondary" />
         </div>
       )}
 
@@ -295,7 +309,7 @@ export default function Skills() {
         <>
           {/* Search */}
           <div className="relative mb-6">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-theme-secondary" />
             <input
               type="text"
               placeholder="Search skills..."
@@ -317,8 +331,8 @@ export default function Skills() {
             <div className="lg:col-span-2 space-y-2">
               {filteredSkills?.length === 0 ? (
                 <div className="glass-card p-10 text-center">
-                  <Search className="w-10 h-10 mx-auto text-slate-600 mb-3" />
-                  <p className="text-slate-400">
+                  <Search className="w-10 h-10 mx-auto text-theme-secondary mb-3" />
+                  <p className="text-theme-secondary">
                     {searchQuery ? 'No skills match your search' : 'No skills available'}
                   </p>
                 </div>
@@ -338,11 +352,11 @@ export default function Skills() {
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3.5">
-                          <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${iconCfg.gradient} border border-white/[0.06] flex items-center justify-center text-xl flex-shrink-0`}>
+                          <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${iconCfg.gradient} border border-theme flex items-center justify-center text-xl flex-shrink-0`}>
                             {iconCfg.icon}
                           </div>
                           <div>
-                            <h3 className="font-medium text-white text-[14px] capitalize flex items-center gap-2">
+                            <h3 className="font-medium text-theme-primary text-[14px] capitalize flex items-center gap-2">
                               {skill.name}
                               {skill.enabled && hasSetup && (
                                 <span className="text-[10px] text-amber-400/80 font-normal px-1.5 py-0.5 bg-amber-500/10 rounded flex items-center gap-1 border border-amber-500/20">
@@ -350,7 +364,7 @@ export default function Skills() {
                                 </span>
                               )}
                             </h3>
-                            <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{skill.description}</p>
+                            <p className="text-xs text-theme-secondary mt-0.5 line-clamp-1">{skill.description}</p>
                           </div>
                         </div>
 
@@ -359,7 +373,7 @@ export default function Skills() {
                             className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded ${
                               skill.enabled
                                 ? 'bg-green-500/10 text-green-400 border border-green-500/20'
-                                : 'bg-slate-800/50 text-slate-500 border border-white/[0.06]'
+                                : 'card-theme text-theme-secondary border border-theme'
                             }`}
                           >
                             {skill.enabled ? 'On' : 'Off'}
@@ -376,13 +390,13 @@ export default function Skills() {
                             className={`p-1.5 rounded-lg transition-all ${
                               skill.enabled
                                 ? 'text-green-400 hover:bg-green-500/10'
-                                : 'text-slate-500 hover:bg-white/[0.04]'
+                                : 'text-theme-secondary hover:bg-theme-hover'
                             }`}
                             title={skill.enabled ? 'Disable skill' : 'Enable skill'}
                           >
                             <Power className="w-4 h-4" />
                           </button>
-                          <ChevronRight className={`w-4 h-4 text-slate-600 transition-transform ${selectedSkill === skill.name ? 'rotate-90' : ''}`} />
+                          <ChevronRight className={`w-4 h-4 text-theme-secondary transition-transform ${selectedSkill === skill.name ? 'rotate-90' : ''}`} />
                         </div>
                       </div>
                     </div>
@@ -396,31 +410,31 @@ export default function Skills() {
               {selected ? (
                 <div className="glass-card p-5 sticky top-6 animate-fade-in">
                   <div className="flex items-center gap-3 mb-5">
-                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${(skillIcons[selected.name] || defaultSkillIcon).gradient} border border-white/[0.06] flex items-center justify-center text-2xl`}>
+                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${(skillIcons[selected.name] || defaultSkillIcon).gradient} border border-theme flex items-center justify-center text-2xl`}>
                       {(skillIcons[selected.name] || defaultSkillIcon).icon}
                     </div>
                     <div>
-                      <h2 className="text-lg font-bold text-white capitalize">
+                      <h2 className="text-lg font-bold text-theme-primary capitalize">
                         {selected.name}
                       </h2>
                       <div className="flex items-center gap-2">
-                        <p className="text-xs text-slate-500">v{selected.version}</p>
+                        <p className="text-xs text-theme-secondary">v{selected.version}</p>
                         <span
                           className={`w-1.5 h-1.5 rounded-full ${
-                            selected.enabled ? 'bg-green-400' : 'bg-slate-600'
+                            selected.enabled ? 'bg-green-400' : 'bg-theme-muted'
                           }`}
                         />
                       </div>
                     </div>
                   </div>
 
-                  <p className="text-sm text-slate-400 mb-5 leading-relaxed">{selected.description}</p>
+                  <p className="text-sm text-theme-secondary mb-5 leading-relaxed">{selected.description}</p>
 
                   {/* Setup help text */}
                   {SKILL_SETUP_HELP[selected.name] && (
                     <div className="mb-4 p-3 bg-blue-500/[0.06] border border-blue-500/20 rounded-lg">
                       <p className="text-[11px] text-blue-400 font-medium mb-1">Setup Info</p>
-                      <p className="text-[11px] text-slate-400">{SKILL_SETUP_HELP[selected.name]}</p>
+                      <p className="text-[11px] text-theme-secondary">{SKILL_SETUP_HELP[selected.name]}</p>
                     </div>
                   )}
 
@@ -430,8 +444,8 @@ export default function Skills() {
                   {/* Capabilities */}
                   <div className="mt-5">
                     <div className="flex items-center gap-2 mb-3">
-                      <Zap className="w-3.5 h-3.5 text-slate-500" />
-                      <h3 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                      <Zap className="w-3.5 h-3.5 text-theme-secondary" />
+                      <h3 className="text-[11px] font-semibold text-theme-secondary uppercase tracking-wider">
                         Capabilities ({selected.capabilities?.length || 0})
                       </h3>
                     </div>
@@ -440,21 +454,21 @@ export default function Skills() {
                         selected.capabilities.map((cap) => (
                           <div
                             key={cap.name}
-                            className="bg-slate-900/40 border border-white/[0.04] rounded-lg p-3"
+                            className="card-theme border border-theme rounded-lg p-3"
                           >
-                            <p className="font-medium text-white text-xs">{cap.name}</p>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
+                            <p className="font-medium text-theme-primary text-xs">{cap.name}</p>
+                            <p className="text-[11px] text-theme-secondary mt-0.5">
                               {cap.description}
                             </p>
                           </div>
                         ))
                       ) : (
-                        <p className="text-xs text-slate-600">No capabilities listed</p>
+                        <p className="text-xs text-theme-secondary">No capabilities listed</p>
                       )}
                     </div>
                   </div>
 
-                  <div className="mt-5 pt-4 border-t border-white/[0.06]">
+                  <div className="mt-5 pt-4 border-t border-theme">
                     <button
                       onClick={() =>
                         toggleMutation.mutate({
@@ -475,11 +489,11 @@ export default function Skills() {
                 </div>
               ) : (
                 <div className="glass-card p-8 text-center">
-                  <div className="w-14 h-14 rounded-2xl bg-slate-800/50 border border-white/[0.06] flex items-center justify-center mx-auto mb-4">
-                    <Puzzle className="w-7 h-7 text-slate-600" />
+                  <div className="w-14 h-14 rounded-2xl card-theme border border-theme flex items-center justify-center mx-auto mb-4">
+                    <Puzzle className="w-7 h-7 text-theme-secondary" />
                   </div>
-                  <p className="text-sm text-slate-400">Select a skill to view details</p>
-                  <p className="text-xs text-slate-600 mt-1.5">
+                  <p className="text-sm text-theme-secondary">Select a skill to view details</p>
+                  <p className="text-xs text-theme-secondary mt-1.5">
                     Click any skill to configure and test it
                   </p>
                 </div>

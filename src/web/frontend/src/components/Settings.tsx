@@ -164,7 +164,7 @@ export default function Settings() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-6 h-6 animate-spin text-slate-600" />
+        <Loader2 className="w-6 h-6 animate-spin text-theme-secondary" />
       </div>
     );
   }
@@ -174,8 +174,8 @@ export default function Settings() {
       <div className="flex items-center justify-center h-full p-6">
         <div className="glass-card p-10 text-center max-w-md">
           <AlertCircle className="w-12 h-12 mx-auto text-red-400/60 mb-4" />
-          <h2 className="text-lg font-semibold text-white mb-2">Failed to load configuration</h2>
-          <p className="text-sm text-slate-500 mb-6">
+          <h2 className="text-lg font-semibold text-theme-primary mb-2">Failed to load configuration</h2>
+          <p className="text-sm text-theme-secondary mb-6">
             {(error as any)?.response?.status === 401
               ? 'Session expired. Please log in again.'
               : (error as any)?.message || 'Could not connect to the Aria server. Make sure it is running.'}
@@ -195,8 +195,8 @@ export default function Settings() {
   return (
     <div className="flex h-full">
       {/* Tab sidebar */}
-      <div className="w-52 bg-slate-900/40 border-r border-white/[0.06] p-3 space-y-0.5 flex-shrink-0">
-        <h2 className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest px-3 py-2">
+      <div className="w-52 card-theme border-r p-3 space-y-0.5 flex-shrink-0 border-theme">
+        <h2 className="text-[10px] font-semibold text-theme-secondary uppercase tracking-widest px-3 py-2">
           Configuration
         </h2>
         {TABS.map((tab) => (
@@ -206,7 +206,7 @@ export default function Settings() {
             className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all ${
               activeTab === tab.id
                 ? 'bg-gradient-to-r from-blue-600/20 to-blue-500/10 text-blue-400 border border-blue-500/20'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-hover'
             }`}
           >
             <tab.icon className="w-4 h-4" />
@@ -238,7 +238,7 @@ export default function Settings() {
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="glass-card p-5 mb-5">
-      <h3 className="text-sm font-semibold text-white mb-4">{title}</h3>
+      <h3 className="text-sm font-semibold text-theme-primary mb-4">{title}</h3>
       {children}
     </div>
   );
@@ -320,8 +320,8 @@ function SaveButton({
 function TabHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="mb-6">
-      <h2 className="text-xl font-bold text-white tracking-tight">{title}</h2>
-      <p className="text-sm text-slate-500 mt-1">{subtitle}</p>
+      <h2 className="text-xl font-bold text-theme-primary tracking-tight">{title}</h2>
+      <p className="text-sm text-theme-secondary mt-1">{subtitle}</p>
     </div>
   );
 }
@@ -406,19 +406,19 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
       <SectionCard title="Anthropic Claude">
         <div className="space-y-4">
           <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-sm text-slate-300">Enable Claude (cloud)</span>
+            <span className="text-sm text-theme-primary">Enable Claude (cloud)</span>
             <input
               type="checkbox"
               checked={cloudEnabled}
               onChange={(e) => setCloudEnabled(e.target.checked)}
-              className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+              className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
             />
           </label>
 
           {cloudEnabled && (
             <>
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">Model</label>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Model</label>
                 <select
                   value={anthropicModel}
                   onChange={(e) => setAnthropicModel(e.target.value)}
@@ -431,7 +431,7 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">
                   API Key{' '}
                   {config.llm.anthropic_key_set && (
                     <span className="text-green-400 normal-case tracking-normal">(set)</span>
@@ -452,7 +452,7 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
                     />
                     <button
                       onClick={() => setShowKey(!showKey)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-theme-secondary hover:text-theme-primary transition-colors"
                     >
                       {showKey ? (
                         <EyeOff className="w-4 h-4" />
@@ -464,7 +464,7 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
                   <button
                     onClick={() => validateMutation.mutate()}
                     disabled={!apiKey || validateMutation.isPending}
-                    className="px-3 py-2 bg-slate-800/60 hover:bg-slate-700/60 disabled:opacity-50 text-white rounded-lg text-sm flex items-center gap-1.5 border border-white/[0.06] transition-all"
+                    className="px-3 py-2 btn-theme-secondary hover:bg-theme-muted disabled:opacity-50 text-theme-primary rounded-lg text-sm flex items-center gap-1.5 border border-theme transition-all"
                   >
                     {validateMutation.isPending ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -494,19 +494,19 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
       <SectionCard title="Ollama (Local)">
         <div className="space-y-4">
           <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-sm text-slate-300">Enable Ollama (local)</span>
+            <span className="text-sm text-theme-primary">Enable Ollama (local)</span>
             <input
               type="checkbox"
               checked={ollamaEnabled}
               onChange={(e) => setOllamaEnabled(e.target.checked)}
-              className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+              className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
             />
           </label>
 
           {ollamaEnabled && (
             <>
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">Model</label>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Model</label>
                 {detection?.ollama.models && detection.ollama.models.length > 0 ? (
                   <select
                     value={ollamaModel}
@@ -532,7 +532,7 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
                 )}
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">Base URL</label>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Base URL</label>
                 <input
                   type="text"
                   value={ollamaUrl}
@@ -620,7 +620,7 @@ function ChannelsTab({
 
       <SectionCard title="Web UI">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-slate-300">Web dashboard</span>
+          <span className="text-sm text-theme-primary">Web dashboard</span>
           <StatusBadge ok={true} label="Always enabled" />
         </div>
       </SectionCard>
@@ -628,19 +628,19 @@ function ChannelsTab({
       <SectionCard title="Slack">
         <div className="space-y-4">
           <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-sm text-slate-300">Enable Slack</span>
+            <span className="text-sm text-theme-primary">Enable Slack</span>
             <input
               type="checkbox"
               checked={slackEnabled}
               onChange={(e) => setSlackEnabled(e.target.checked)}
-              className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+              className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
             />
           </label>
 
           {slackEnabled && (
             <>
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">
                   Bot Token{' '}
                   {config.channels.slack_bot_token_set && (
                     <span className="text-green-400 normal-case tracking-normal">(set)</span>
@@ -659,7 +659,7 @@ function ChannelsTab({
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">
                   App Token{' '}
                   {config.channels.slack_app_token_set && (
                     <span className="text-green-400 normal-case tracking-normal">(set)</span>
@@ -682,7 +682,7 @@ function ChannelsTab({
                   <button
                     onClick={() => validateSlack.mutate()}
                     disabled={validateSlack.isPending}
-                    className="px-3 py-2 bg-slate-800/60 hover:bg-slate-700/60 text-white rounded-lg text-sm flex items-center gap-1.5 border border-white/[0.06] transition-all"
+                    className="px-3 py-2 btn-theme-secondary hover:bg-theme-muted text-theme-primary rounded-lg text-sm flex items-center gap-1.5 border border-theme transition-all"
                   >
                     {validateSlack.isPending ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -731,12 +731,12 @@ function ChannelsTab({
       <SectionCard title="WhatsApp">
         <div className="space-y-4">
           <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-sm text-slate-300">Enable WhatsApp</span>
+            <span className="text-sm text-theme-primary">Enable WhatsApp</span>
             <input
               type="checkbox"
               checked={whatsappEnabled}
               onChange={(e) => setWhatsappEnabled(e.target.checked)}
-              className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+              className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
             />
           </label>
           {whatsappEnabled && (
@@ -747,7 +747,7 @@ function ChannelsTab({
                 </p>
               )}
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">Bridge Port</label>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Bridge Port</label>
                 <input
                   type="number"
                   value={bridgePort}
@@ -756,7 +756,7 @@ function ChannelsTab({
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">
                   Allowed Phone Numbers
                 </label>
                 <input
@@ -766,7 +766,7 @@ function ChannelsTab({
                   placeholder="919882278774, 14155551234"
                   className="w-full px-3 py-2.5 glass-input"
                 />
-                <p className="text-[11px] text-slate-600 mt-1.5">
+                <p className="text-[11px] text-theme-secondary mt-1.5">
                   Comma-separated phone numbers with country code (no +). Only these numbers can message Aria. Leave empty to allow all.
                 </p>
               </div>
@@ -849,15 +849,15 @@ function WhatsAppQRSection() {
 
   if (!bridgeStatus || bridgeStatus.bridge_running === false) {
     return (
-      <div className="bg-slate-900/40 border border-white/[0.04] rounded-lg p-4">
+      <div className="card-theme border border-theme rounded-lg p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-slate-800/60 border border-white/[0.06] flex items-center justify-center">
-              <Smartphone className="w-4 h-4 text-slate-500" />
+            <div className="w-8 h-8 rounded-lg btn-theme-secondary border border-theme flex items-center justify-center">
+              <Smartphone className="w-4 h-4 text-theme-secondary" />
             </div>
             <div>
-              <p className="text-sm text-slate-400">Bridge not running</p>
-              <p className="text-[11px] text-slate-600">
+              <p className="text-sm text-theme-secondary">Bridge not running</p>
+              <p className="text-[11px] text-theme-secondary">
                 Start the WhatsApp bridge to connect your phone.
               </p>
             </div>
@@ -889,7 +889,7 @@ function WhatsAppQRSection() {
           </div>
           <div>
             <p className="text-sm text-green-400 font-medium">WhatsApp Connected</p>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-theme-secondary">
               Your WhatsApp account is linked and ready.
             </p>
           </div>
@@ -900,12 +900,12 @@ function WhatsAppQRSection() {
 
   if (bridgeStatus.hasQR && qrData?.qr) {
     return (
-      <div className="bg-slate-900/40 border border-white/[0.04] rounded-lg p-4">
+      <div className="card-theme border border-theme rounded-lg p-4">
         <div className="flex items-center gap-2 mb-3">
           <Smartphone className="w-4 h-4 text-blue-400" />
-          <p className="text-sm text-white font-medium">Scan QR Code</p>
+          <p className="text-sm text-theme-primary font-medium">Scan QR Code</p>
         </div>
-        <p className="text-xs text-slate-500 mb-4">
+        <p className="text-xs text-theme-secondary mb-4">
           Open WhatsApp on your phone &gt; Settings &gt; Linked Devices &gt; Link a Device
         </p>
         <div className="flex justify-center">
@@ -913,7 +913,7 @@ function WhatsAppQRSection() {
             <canvas ref={canvasRef} />
           </div>
         </div>
-        <p className="text-[10px] text-slate-600 text-center mt-3">
+        <p className="text-[10px] text-theme-secondary text-center mt-3">
           QR code refreshes automatically
         </p>
       </div>
@@ -921,10 +921,10 @@ function WhatsAppQRSection() {
   }
 
   return (
-    <div className="bg-slate-900/40 border border-white/[0.04] rounded-lg p-4">
+    <div className="card-theme border border-theme rounded-lg p-4">
       <div className="flex items-center gap-3">
         <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
-        <p className="text-sm text-slate-400">Waiting for QR code from bridge...</p>
+        <p className="text-sm text-theme-secondary">Waiting for QR code from bridge...</p>
       </div>
     </div>
   );
@@ -965,17 +965,17 @@ function DockerControls() {
         {status?.containers && status.containers.length > 0 ? (
           <div className="space-y-1.5">
             {status.containers.map((c) => (
-              <div key={c.name} className="flex items-center justify-between bg-slate-900/40 border border-white/[0.04] rounded-lg p-2.5">
+              <div key={c.name} className="flex items-center justify-between card-theme border border-theme rounded-lg p-2.5">
                 <div>
-                  <p className="text-xs font-medium text-white">{c.name}</p>
-                  <p className="text-[10px] text-slate-500">{c.status}</p>
+                  <p className="text-xs font-medium text-theme-primary">{c.name}</p>
+                  <p className="text-[10px] text-theme-secondary">{c.status}</p>
                 </div>
-                <span className="text-[10px] text-slate-500 font-mono">{c.ports}</span>
+                <span className="text-[10px] text-theme-secondary font-mono">{c.ports}</span>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-xs text-slate-500">No Aria containers running</p>
+          <p className="text-xs text-theme-secondary">No Aria containers running</p>
         )}
 
         {msg && (
@@ -1086,7 +1086,7 @@ function EnvironmentTab({
             className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer border transition-all ${
               deploymentMode === 'local'
                 ? 'border-blue-500/30 bg-blue-500/[0.05]'
-                : 'border-white/[0.06] hover:border-white/[0.1]'
+                : 'border-theme hover:border-blue-500/30'
             }`}
           >
             <input
@@ -1097,8 +1097,8 @@ function EnvironmentTab({
               className="mt-1"
             />
             <div>
-              <p className="font-medium text-sm text-white">Local</p>
-              <p className="text-xs text-slate-500">
+              <p className="font-medium text-sm text-theme-primary">Local</p>
+              <p className="text-xs text-theme-secondary">
                 Aria runs directly on your machine.
               </p>
             </div>
@@ -1107,7 +1107,7 @@ function EnvironmentTab({
             className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer border transition-all ${
               deploymentMode === 'docker'
                 ? 'border-blue-500/30 bg-blue-500/[0.05]'
-                : 'border-white/[0.06] hover:border-white/[0.1]'
+                : 'border-theme hover:border-blue-500/30'
             }`}
           >
             <input
@@ -1118,8 +1118,8 @@ function EnvironmentTab({
               className="mt-1"
             />
             <div>
-              <p className="font-medium text-sm text-white">Docker</p>
-              <p className="text-xs text-slate-500">
+              <p className="font-medium text-sm text-theme-primary">Docker</p>
+              <p className="text-xs text-theme-secondary">
                 All services run in containers. Auto-starts on next launch.
               </p>
             </div>
@@ -1139,7 +1139,7 @@ function EnvironmentTab({
             className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer border transition-all ${
               mode === 'docker'
                 ? 'border-blue-500/30 bg-blue-500/[0.05]'
-                : 'border-white/[0.06] hover:border-white/[0.1]'
+                : 'border-theme hover:border-blue-500/30'
             }`}
           >
             <input
@@ -1150,8 +1150,8 @@ function EnvironmentTab({
               className="mt-1"
             />
             <div>
-              <p className="font-medium text-sm text-white">Docker (Sandboxed)</p>
-              <p className="text-xs text-slate-500">
+              <p className="font-medium text-sm text-theme-primary">Docker (Sandboxed)</p>
+              <p className="text-xs text-theme-secondary">
                 Commands run in an isolated container. Safer but requires Docker.
               </p>
             </div>
@@ -1160,7 +1160,7 @@ function EnvironmentTab({
             className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer border transition-all ${
               mode === 'direct'
                 ? 'border-blue-500/30 bg-blue-500/[0.05]'
-                : 'border-white/[0.06] hover:border-white/[0.1]'
+                : 'border-theme hover:border-blue-500/30'
             }`}
           >
             <input
@@ -1171,8 +1171,8 @@ function EnvironmentTab({
               className="mt-1"
             />
             <div>
-              <p className="font-medium text-sm text-white">Local (Direct)</p>
-              <p className="text-xs text-slate-500">
+              <p className="font-medium text-sm text-theme-primary">Local (Direct)</p>
+              <p className="text-xs text-theme-secondary">
                 Commands run directly on your machine. No extra setup needed.
               </p>
             </div>
@@ -1188,18 +1188,18 @@ function EnvironmentTab({
                 <p className="text-xs text-yellow-400 flex items-center gap-1.5">
                   <AlertTriangle className="w-3.5 h-3.5" /> Docker is not installed on this system
                 </p>
-                <div className="bg-slate-900/40 border border-white/[0.04] rounded-lg p-4 text-xs text-slate-400 space-y-2">
-                  <p className="font-medium text-white text-sm">Installation Steps:</p>
+                <div className="card-theme border border-theme rounded-lg p-4 text-xs text-theme-secondary space-y-2">
+                  <p className="font-medium text-theme-primary text-sm">Installation Steps:</p>
                   <ol className="list-decimal list-inside space-y-1.5 ml-1">
                     <li>Install Docker Desktop from <span className="text-blue-400">docker.com/get-started</span></li>
                     <li>Start Docker Desktop and wait for it to initialize</li>
                     <li>Build the Aria sandbox image:
-                      <code className="block mt-1 bg-slate-800/80 px-2.5 py-1.5 rounded text-blue-300 font-mono">docker build -t aria-sandbox:latest -f docker/Dockerfile.sandbox .</code>
+                      <code className="block mt-1 card-theme px-2.5 py-1.5 rounded text-blue-300 font-mono">docker build -t aria-sandbox:latest -f docker/Dockerfile.sandbox .</code>
                     </li>
                     <li>Restart Aria to use Docker sandboxing</li>
                   </ol>
-                  <p className="text-slate-500 mt-2">Alternatively, use <span className="text-white font-medium">docker-compose</span> to run the full stack:</p>
-                  <code className="block bg-slate-800/80 px-2.5 py-1.5 rounded text-blue-300 font-mono">docker-compose -f docker/docker-compose.yaml up -d</code>
+                  <p className="text-theme-secondary mt-2">Alternatively, use <span className="text-theme-primary font-medium">docker-compose</span> to run the full stack:</p>
+                  <code className="block card-theme px-2.5 py-1.5 rounded text-blue-300 font-mono">docker-compose -f docker/docker-compose.yaml up -d</code>
                 </div>
               </div>
             </SectionCard>
@@ -1212,7 +1212,7 @@ function EnvironmentTab({
           <SectionCard title="Docker Settings">
             <div className="space-y-4">
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">Memory Limit</label>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Memory Limit</label>
                 <input
                   type="text"
                   value={dockerMem}
@@ -1221,7 +1221,7 @@ function EnvironmentTab({
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">CPU Limit</label>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">CPU Limit</label>
                 <input
                   type="text"
                   value={dockerCpu}
@@ -1237,7 +1237,7 @@ function EnvironmentTab({
 
       <SectionCard title="Trusted Paths">
         <div>
-          <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">
+          <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">
             Comma-separated list of paths accessible without sandbox
           </label>
           <input
@@ -1316,7 +1316,7 @@ function SecurityTab({ config }: { config: FullConfig }) {
           <label
             key={p}
             className={`flex items-start gap-3 p-4 rounded-lg cursor-pointer border transition-all ${
-              profile === p ? PROFILE_INFO[p].border : 'border-white/[0.06] hover:border-white/[0.1]'
+              profile === p ? PROFILE_INFO[p].border : 'border-theme hover:border-blue-500/30'
             }`}
           >
             <input
@@ -1327,13 +1327,13 @@ function SecurityTab({ config }: { config: FullConfig }) {
               className="mt-0.5"
             />
             <div>
-              <p className="font-medium text-sm text-white capitalize">
+              <p className="font-medium text-sm text-theme-primary capitalize">
                 {p}{' '}
                 {p === 'balanced' && (
                   <span className="text-[10px] text-yellow-400 ml-1 font-normal">(recommended)</span>
                 )}
               </p>
-              <p className="text-xs text-slate-500">{PROFILE_INFO[p].desc}</p>
+              <p className="text-xs text-theme-secondary">{PROFILE_INFO[p].desc}</p>
             </div>
           </label>
         ))}
@@ -1343,7 +1343,7 @@ function SecurityTab({ config }: { config: FullConfig }) {
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="text-slate-500 border-b border-white/[0.06]">
+              <tr className="text-theme-secondary border-b border-theme">
                 <th className="text-left py-2 pr-4 font-medium">Action</th>
                 <th className="text-center py-2 px-3 text-red-400/70 font-medium">Paranoid</th>
                 <th className="text-center py-2 px-3 text-yellow-400/70 font-medium">Balanced</th>
@@ -1353,7 +1353,7 @@ function SecurityTab({ config }: { config: FullConfig }) {
             <tbody>
               {PROFILE_TABLE.map((row) => (
                 <tr key={row.action} className="border-b border-white/[0.03]">
-                  <td className="py-2 pr-4 text-slate-400">{row.action}</td>
+                  <td className="py-2 pr-4 text-theme-secondary">{row.action}</td>
                   <td className={`text-center py-2 px-3 ${actionColor(row.paranoid)}`}>
                     {row.paranoid}
                   </td>
@@ -1368,7 +1368,7 @@ function SecurityTab({ config }: { config: FullConfig }) {
             </tbody>
           </table>
         </div>
-        <p className="text-[10px] text-slate-600 mt-3">
+        <p className="text-[10px] text-theme-secondary mt-3">
           * Auto actions are restricted to safe paths/domains
         </p>
       </SectionCard>
@@ -1449,7 +1449,7 @@ function BrowserTab({
               className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer border transition-all ${
                 mode === opt.value
                   ? 'border-blue-500/30 bg-blue-500/[0.05]'
-                  : 'border-white/[0.06] hover:border-white/[0.1]'
+                  : 'border-theme hover:border-blue-500/30'
               }`}
             >
               <input
@@ -1460,8 +1460,8 @@ function BrowserTab({
                 className="mt-1"
               />
               <div>
-                <p className="font-medium text-sm text-white">{opt.label}</p>
-                <p className="text-xs text-slate-500">{opt.desc}</p>
+                <p className="font-medium text-sm text-theme-primary">{opt.label}</p>
+                <p className="text-xs text-theme-secondary">{opt.desc}</p>
               </div>
             </label>
           ))}
@@ -1484,7 +1484,7 @@ function BrowserTab({
               <button
                 onClick={() => validateBrave.mutate()}
                 disabled={!braveKey || validateBrave.isPending}
-                className="px-3 py-2 bg-slate-800/60 hover:bg-slate-700/60 disabled:opacity-50 text-white rounded-lg text-sm flex items-center gap-1.5 border border-white/[0.06] transition-all"
+                className="px-3 py-2 btn-theme-secondary hover:bg-theme-muted disabled:opacity-50 text-theme-primary rounded-lg text-sm flex items-center gap-1.5 border border-theme transition-all"
               >
                 {validateBrave.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -1586,24 +1586,24 @@ function IntegrationsTab({ config }: { config: FullConfig }) {
     keyPlaceholder?: string;
     showKey?: boolean;
   }) => (
-    <div className="py-4 border-b border-white/[0.06] last:border-0">
+    <div className="py-4 border-b border-theme last:border-0">
       <div className="flex items-center justify-between mb-2">
         <div>
-          <p className="text-sm font-medium text-white">{name}</p>
-          <p className="text-xs text-slate-500">{description}</p>
+          <p className="text-sm font-medium text-theme-primary">{name}</p>
+          <p className="text-xs text-theme-secondary">{description}</p>
         </div>
         <label className="cursor-pointer">
           <input
             type="checkbox"
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
-            className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+            className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
           />
         </label>
       </div>
       {showKey && setKeyValue && keyPlaceholder && (
         <div className="mt-2">
-          <label className="block text-[11px] text-slate-500 mb-1 uppercase tracking-wider">{keyLabel ?? 'API Key'}</label>
+          <label className="block text-[11px] text-theme-secondary mb-1 uppercase tracking-wider">{keyLabel ?? 'API Key'}</label>
           <input
             type="password"
             value={keyValue ?? ''}
@@ -1659,24 +1659,24 @@ function IntegrationsTab({ config }: { config: FullConfig }) {
       </SectionCard>
 
       <SectionCard title="Spotify">
-        <div className="py-4 border-b border-white/[0.06] last:border-0">
+        <div className="py-4 border-b border-theme last:border-0">
           <div className="flex items-center justify-between mb-2">
             <div>
-              <p className="text-sm font-medium text-white">Spotify</p>
-              <p className="text-xs text-slate-500">Control playback, suggest playlists</p>
+              <p className="text-sm font-medium text-theme-primary">Spotify</p>
+              <p className="text-xs text-theme-secondary">Control playback, suggest playlists</p>
             </div>
             <label className="cursor-pointer">
               <input
                 type="checkbox"
                 checked={spotifyEnabled}
                 onChange={(e) => setSpotifyEnabled(e.target.checked)}
-                className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+                className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
               />
             </label>
           </div>
           <div className="mt-2 space-y-2">
             <div>
-              <label className="block text-[11px] text-slate-500 mb-1 uppercase tracking-wider">Client ID</label>
+              <label className="block text-[11px] text-theme-secondary mb-1 uppercase tracking-wider">Client ID</label>
               <input
                 type="password"
                 value={spotifyClientId}
@@ -1686,7 +1686,7 @@ function IntegrationsTab({ config }: { config: FullConfig }) {
               />
             </div>
             <div>
-              <label className="block text-[11px] text-slate-500 mb-1 uppercase tracking-wider">Client Secret</label>
+              <label className="block text-[11px] text-theme-secondary mb-1 uppercase tracking-wider">Client Secret</label>
               <input
                 type="password"
                 value={spotifyClientSecret}
@@ -1742,18 +1742,18 @@ function SkillsTab({ config }: { config: FullConfig }) {
             {skillNames.map((name) => (
               <div key={name} className="py-1">
                 <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-sm text-slate-300">{SKILL_META[name]?.label || name}</span>
+                  <span className="text-sm text-theme-primary">{SKILL_META[name]?.label || name}</span>
                   <input
                     type="checkbox"
                     checked={skills[name] ?? false}
                     onChange={(e) =>
                       setSkills((prev) => ({ ...prev, [name]: e.target.checked }))
                     }
-                    className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+                    className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
                   />
                 </label>
                 {skills[name] && SKILL_META[name]?.setup && (
-                  <p className="text-[11px] text-slate-500 mt-1 ml-0.5">
+                  <p className="text-[11px] text-theme-secondary mt-1 ml-0.5">
                     {SKILL_META[name].setup}
                   </p>
                 )}
@@ -1823,14 +1823,14 @@ function MemoryTab({ config }: { config: FullConfig }) {
       <SectionCard title="Vector Memory (ChromaDB)">
         <div className="space-y-2 text-sm">
           <div className="flex justify-between py-1">
-            <span className="text-slate-500 text-xs">Provider</span>
+            <span className="text-theme-secondary text-xs">Provider</span>
             <StatusBadge ok={true} label="ChromaDB" />
           </div>
           <div className="flex justify-between py-1">
-            <span className="text-slate-500 text-xs">Status</span>
+            <span className="text-theme-secondary text-xs">Status</span>
             <StatusBadge ok={true} label="Active" />
           </div>
-          <p className="text-[11px] text-slate-600 mt-2">
+          <p className="text-[11px] text-theme-secondary mt-2">
             Vector memory provides semantic search over conversations, documents, and ingested knowledge.
           </p>
         </div>
@@ -1840,8 +1840,8 @@ function MemoryTab({ config }: { config: FullConfig }) {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-300 font-medium">Knowledge Graph</p>
-              <p className="text-xs text-slate-500">
+              <p className="text-sm text-theme-primary font-medium">Knowledge Graph</p>
+              <p className="text-xs text-theme-secondary">
                 Extracts entities, relationships, and structured knowledge using cognee.
               </p>
             </div>
@@ -1850,15 +1850,15 @@ function MemoryTab({ config }: { config: FullConfig }) {
                 type="checkbox"
                 checked={kgEnabled}
                 onChange={(e) => setKgEnabled(e.target.checked)}
-                className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+                className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
               />
             </label>
           </div>
 
           {!kgEnabled && (
-            <div className="bg-slate-900/40 border border-white/[0.04] rounded-lg p-4 text-xs text-slate-500 space-y-1">
+            <div className="card-theme border border-theme rounded-lg p-4 text-xs text-theme-secondary space-y-1">
               <p>To use the knowledge graph, enable it above and install cognee:</p>
-              <code className="block mt-1.5 bg-slate-800/80 px-2.5 py-1.5 rounded text-blue-300 font-mono">pip install cognee</code>
+              <code className="block mt-1.5 card-theme px-2.5 py-1.5 rounded text-blue-300 font-mono">pip install cognee</code>
             </div>
           )}
 
@@ -1866,20 +1866,20 @@ function MemoryTab({ config }: { config: FullConfig }) {
             <>
               <div className="flex items-center justify-between py-2">
                 <div>
-                  <p className="text-sm text-slate-300">Auto-process after ingestion</p>
-                  <p className="text-xs text-slate-500">Process knowledge graph automatically when documents are ingested</p>
+                  <p className="text-sm text-theme-primary">Auto-process after ingestion</p>
+                  <p className="text-xs text-theme-secondary">Process knowledge graph automatically when documents are ingested</p>
                 </div>
                 <label className="cursor-pointer">
                   <input
                     type="checkbox"
                     checked={kgAutoProcess}
                     onChange={(e) => setKgAutoProcess(e.target.checked)}
-                    className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+                    className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
                   />
                 </label>
               </div>
 
-              <div className="bg-slate-900/40 border border-white/[0.04] rounded-lg p-4 text-xs text-slate-500 space-y-1">
+              <div className="card-theme border border-theme rounded-lg p-4 text-xs text-theme-secondary space-y-1">
                 <p>The knowledge graph processes ingested data to extract:</p>
                 <ul className="list-disc list-inside ml-2 space-y-0.5">
                   <li>Named entities (people, places, concepts)</li>
@@ -1891,7 +1891,7 @@ function MemoryTab({ config }: { config: FullConfig }) {
               <button
                 onClick={handleProcessGraph}
                 disabled={processing}
-                className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-all shadow-lg shadow-purple-500/20 flex items-center gap-2"
+                className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 disabled:opacity-50 text-theme-primary rounded-lg font-medium text-sm transition-all shadow-lg shadow-purple-500/20 flex items-center gap-2"
               >
                 {processing ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -1918,15 +1918,15 @@ function MemoryTab({ config }: { config: FullConfig }) {
       <SectionCard title="Memory Settings">
         <div className="space-y-2 text-xs">
           <div className="flex justify-between py-1">
-            <span className="text-slate-500">Short-term memory</span>
-            <span className="text-slate-300">50 messages max</span>
+            <span className="text-theme-secondary">Short-term memory</span>
+            <span className="text-theme-primary">50 messages max</span>
           </div>
           <div className="flex justify-between py-1">
-            <span className="text-slate-500">Episodic memory</span>
-            <span className="text-slate-300">1000 episodes max</span>
+            <span className="text-theme-secondary">Episodic memory</span>
+            <span className="text-theme-primary">1000 episodes max</span>
           </div>
           <div className="flex justify-between py-1">
-            <span className="text-slate-500">RAG pipeline</span>
+            <span className="text-theme-secondary">RAG pipeline</span>
             <StatusBadge ok={true} label="Active" />
           </div>
         </div>
@@ -1987,25 +1987,25 @@ function DashboardTab({ config }: { config: FullConfig }) {
       <SectionCard title="Info">
         <div className="space-y-2 text-xs">
           <div className="flex justify-between py-1">
-            <span className="text-slate-500">Port</span>
-            <span className="text-slate-300">{config.dashboard.port}</span>
+            <span className="text-theme-secondary">Port</span>
+            <span className="text-theme-primary">{config.dashboard.port}</span>
           </div>
           <div className="flex justify-between py-1">
-            <span className="text-slate-500">URL</span>
-            <span className="text-slate-300">http://localhost:{config.dashboard.port}</span>
+            <span className="text-theme-secondary">URL</span>
+            <span className="text-theme-primary">http://localhost:{config.dashboard.port}</span>
           </div>
         </div>
       </SectionCard>
 
       <SectionCard title="Restart Aria">
         <div className="space-y-3">
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-theme-secondary">
             Restart the Aria server to apply configuration changes. The page will reload automatically.
           </p>
           <button
             onClick={handleRestart}
             disabled={restarting}
-            className="px-4 py-2.5 bg-gradient-to-r from-orange-600 to-red-500 hover:from-orange-500 hover:to-red-400 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-all shadow-lg shadow-orange-500/20 flex items-center gap-2"
+            className="px-4 py-2.5 bg-gradient-to-r from-orange-600 to-red-500 hover:from-orange-500 hover:to-red-400 disabled:opacity-50 text-theme-primary rounded-lg font-medium text-sm transition-all shadow-lg shadow-orange-500/20 flex items-center gap-2"
           >
             {restarting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
             {restarting ? 'Restarting Aria...' : 'Restart Aria'}
@@ -2016,7 +2016,7 @@ function DashboardTab({ config }: { config: FullConfig }) {
       <SectionCard title="Change Admin Password">
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">New Password</label>
+            <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">New Password</label>
             <input
               type="password"
               value={newPassword}
@@ -2026,7 +2026,7 @@ function DashboardTab({ config }: { config: FullConfig }) {
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider font-medium">Confirm Password</label>
+            <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Confirm Password</label>
             <input
               type="password"
               value={confirmPassword}
@@ -2049,7 +2049,7 @@ function DashboardTab({ config }: { config: FullConfig }) {
 
       <SectionCard title="Reset All Settings">
         <div className="space-y-3">
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-theme-secondary">
             This will delete all configuration files (settings.yaml, .env) and restart Aria. The setup wizard will run again on next start. Your data (conversations, logs) will be preserved.
           </p>
           {!showResetConfirm ? (
@@ -2066,7 +2066,7 @@ function DashboardTab({ config }: { config: FullConfig }) {
                 <AlertTriangle className="w-4 h-4" />
                 Are you sure? This cannot be undone.
               </p>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-theme-secondary">
                 All API keys, tokens, and configuration will be deleted. You will need to re-run the setup wizard.
               </p>
               <div className="flex gap-2">
@@ -2082,7 +2082,7 @@ function DashboardTab({ config }: { config: FullConfig }) {
                     }
                   }}
                   disabled={resetting}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-all"
+                  className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-theme-primary rounded-lg text-sm font-medium flex items-center gap-2 transition-all"
                 >
                   {resetting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                   {resetting ? 'Resetting...' : 'Yes, Reset Everything'}

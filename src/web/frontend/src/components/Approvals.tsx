@@ -7,6 +7,13 @@ interface Approval {
   id: string;
   action_type: string;
   description: string;
+  details?: {
+    reason?: string;
+    edits?: Array<{ file_path?: string; old_string?: string; new_string?: string }>;
+    file_path?: string;
+    old_string?: string;
+    new_string?: string;
+  };
   created_at: string;
   timeout: number;
 }
@@ -21,6 +28,7 @@ const actionConfig: Record<string, { icon: string; color: string; gradient: stri
   send_messages:   { icon: '💬', color: 'blue',   gradient: 'from-blue-500/10 to-blue-500/5' },
   calendar_read:   { icon: '📅', color: 'teal',   gradient: 'from-teal-500/10 to-teal-500/5' },
   calendar_write:  { icon: '📅', color: 'teal',   gradient: 'from-teal-500/10 to-teal-500/5' },
+  code_edit:       { icon: '🔧', color: 'violet', gradient: 'from-violet-500/10 to-violet-500/5' },
 };
 
 const defaultAction = { icon: '⚡', color: 'blue', gradient: 'from-blue-500/10 to-blue-500/5' };
@@ -75,7 +83,7 @@ export default function Approvals() {
         <div className="glass-card p-8 text-center mb-6">
           <AlertCircle className="w-10 h-10 mx-auto text-red-400/60 mb-3" />
           <p className="text-red-400 font-medium mb-1">Failed to load approvals</p>
-          <p className="text-sm text-slate-500 mb-4">
+          <p className="text-sm text-theme-secondary mb-4">
             {(error as any)?.message || 'Could not connect to the server.'}
           </p>
           <button
@@ -89,15 +97,15 @@ export default function Approvals() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 className="w-6 h-6 animate-spin text-slate-600" />
+          <Loader2 className="w-6 h-6 animate-spin text-theme-secondary" />
         </div>
       ) : !isError && data?.length === 0 ? (
         <div className="glass-card p-12 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-slate-800/50 border border-white/[0.06] flex items-center justify-center mx-auto mb-5">
+          <div className="w-16 h-16 rounded-2xl card-theme flex items-center justify-center mx-auto mb-5 border border-theme">
             <Shield className="w-8 h-8 text-slate-600" />
           </div>
-          <p className="text-lg font-medium text-slate-300 mb-1">All clear</p>
-          <p className="text-sm text-slate-600">
+          <p className="text-lg font-medium text-theme-primary mb-1">All clear</p>
+          <p className="text-sm text-theme-secondary">
             Actions requiring your approval will appear here
           </p>
         </div>
@@ -111,15 +119,40 @@ export default function Approvals() {
                 className="glass-card-hover p-5 animate-slide-up"
               >
                 <div className="flex items-start gap-4">
-                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${config.gradient} border border-white/[0.06] flex items-center justify-center text-2xl flex-shrink-0`}>
+                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${config.gradient} border border-theme flex items-center justify-center text-2xl flex-shrink-0`}>
                     {config.icon}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-medium text-white text-[15px]">
+                    <h3 className="font-medium text-theme-primary text-[15px]">
                       {approval.action_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
                     </h3>
                     <p className="text-sm text-slate-400 mt-0.5 line-clamp-2">{approval.description}</p>
-                    <div className="flex items-center gap-4 mt-3 text-xs text-slate-500">
+                    {approval.action_type === 'code_edit' && approval.details && (
+                      <div className="mt-3 space-y-3">
+                        {(approval.details.edits ?? (approval.details.file_path ? [{
+                          file_path: approval.details.file_path,
+                          old_string: approval.details.old_string,
+                          new_string: approval.details.new_string,
+                        }] : [])).map((edit: { file_path?: string; old_string?: string; new_string?: string }, idx: number) => (
+                          <div key={idx} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50 overflow-x-auto text-xs font-mono">
+                            <div className="text-slate-500 mb-2 font-medium">{edit.file_path || 'unknown'}</div>
+                            {edit.old_string != null && (
+                              <div className="mb-2">
+                                <span className="text-red-400/80">−</span>
+                                <pre className="whitespace-pre-wrap break-all text-red-300/80 ml-2 inline">{edit.old_string ? edit.old_string.slice(0, 400) + (edit.old_string.length > 400 ? '…' : '') : '(empty)'}</pre>
+                              </div>
+                            )}
+                            {edit.new_string != null && (
+                              <div>
+                                <span className="text-green-400/80">+</span>
+                                <pre className="whitespace-pre-wrap break-all text-green-300/80 ml-2 inline">{edit.new_string ? edit.new_string.slice(0, 400) + (edit.new_string.length > 400 ? '…' : '') : '(empty)'}</pre>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-4 mt-3 text-xs text-theme-secondary">
                       <span className="flex items-center gap-1.5">
                         <Clock className="w-3 h-3" />
                         {format(new Date(approval.created_at), 'HH:mm:ss')}

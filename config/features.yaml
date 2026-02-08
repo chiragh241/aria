@@ -6,6 +6,7 @@ features:
   morning_briefing: true
   context_aware_reminders: true
   proactive_suggestions: true
+  self_healing: true
   time_of_day_awareness: true
 
   # Integrations

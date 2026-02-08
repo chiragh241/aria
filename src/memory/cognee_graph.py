@@ -105,12 +105,13 @@ class CogneeGraphMemory:
             # Use Aria's LLM config (Ollama or Claude)
             provider = _configure_cognee_llm_from_aria()
 
+            # Cognee reads LLM config from env vars; set_llm_config accepts provider/model/key/endpoint only.
+            # LLM_MAX_TOKENS is configured via env (set above in _configure_cognee_llm_from_aria when using cloud).
             cognee.config.set_llm_config({
                 "llm_provider": os.environ.get("LLM_PROVIDER", "ollama"),
                 "llm_model": os.environ.get("LLM_MODEL", "llama3.1:8b"),
                 "llm_api_key": os.environ.get("LLM_API_KEY", "ollama"),
                 "llm_endpoint": os.environ.get("LLM_ENDPOINT", "http://localhost:11434/v1"),
-                "llm_max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "4096")),
             })
 
             self._available = True

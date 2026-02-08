@@ -2,12 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+:root, html.dark {
   --bg-primary: #0a1120;
   --bg-secondary: #0f172a;
   --bg-card: #1e293b;
+  --bg-card-hover: #334155;
+  --bg-muted: rgba(248, 250, 252, 0.15);
+  --bg-hover: rgba(255, 255, 255, 0.04);
   --text-primary: #f1f5f9;
   --text-secondary: #94a3b8;
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --grid-line: rgba(255, 255, 255, 0.15);
   --accent: #3b82f6;
   --accent-purple: #8b5cf6;
   --accent-gradient: linear-gradient(135deg, #3b82f6, #8b5cf6);
@@ -17,16 +22,19 @@ html.light {
   --bg-primary: #f8fafc;
   --bg-secondary: #f1f5f9;
   --bg-card: #e2e8f0;
+  --bg-card-hover: #cbd5e1;
+  --bg-muted: rgba(15, 23, 42, 0.06);
+  --bg-hover: rgba(0, 0, 0, 0.04);
   --text-primary: #0f172a;
   --text-secondary: #475569;
-}
-
-html.light body {
-  @apply bg-slate-50 text-slate-900;
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --grid-line: rgba(0, 0, 0, 0.06);
 }
 
 body {
-  @apply bg-[#0a1120] text-slate-100 antialiased;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  @apply antialiased;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
 }
 
@@ -41,35 +49,81 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-slate-700/50 rounded-full;
+  background-color: color-mix(in srgb, var(--bg-card) 80%, transparent);
+  @apply rounded-full;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-slate-600/70;
+  background-color: color-mix(in srgb, var(--bg-card) 100%, transparent);
+}
+
+/* ── Theme-aware utilities ─────────────────────────────────────────────────── */
+@layer components {
+  .bg-theme-primary { background-color: var(--bg-primary); }
+  .bg-theme-card { background-color: var(--bg-card); }
+  .bg-theme-muted { background-color: var(--bg-muted); }
+  .bg-theme-hover { background-color: var(--bg-hover); }
+  .text-theme-primary { color: var(--text-primary); }
+  .text-theme-secondary { color: var(--text-secondary); }
+  .border-theme { border-color: var(--border-subtle); }
+  .input-theme {
+    background-color: color-mix(in srgb, var(--bg-card) 90%, transparent);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+  }
+  .input-theme::placeholder { color: var(--text-secondary); opacity: 0.8; }
+  .card-theme {
+    background-color: color-mix(in srgb, var(--bg-card) 80%, transparent);
+    border: 1px solid var(--border-subtle);
+  }
+  .btn-theme-secondary {
+    background-color: color-mix(in srgb, var(--bg-card) 90%, transparent);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+  }
+  .btn-theme-secondary:hover {
+    background-color: var(--bg-muted);
+  }
 }
 
 /* ── Glass card utility ────────────────────────────────────────────────────── */
 @layer components {
   .glass-card {
-    @apply bg-slate-800/40 backdrop-blur-sm border border-white/[0.06] rounded-xl;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 3px rgba(0, 0, 0, 0.2);
+    background-color: color-mix(in srgb, var(--bg-card) 70%, transparent);
+    @apply backdrop-blur-sm rounded-xl;
+    border: 1px solid var(--border-subtle);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   }
 
   .glass-card-hover {
     @apply glass-card transition-all duration-200;
   }
   .glass-card-hover:hover {
-    @apply bg-slate-800/60 border-white/[0.1];
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 12px rgba(0, 0, 0, 0.3);
+    background-color: color-mix(in srgb, var(--bg-card) 90%, transparent);
+    border-color: color-mix(in srgb, var(--border-subtle) 1.5, transparent);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
 
   .glass-sidebar {
-    @apply bg-slate-900/80 backdrop-blur-md border-r border-white/[0.06];
+    background-color: color-mix(in srgb, var(--bg-secondary) 95%, transparent);
+    @apply backdrop-blur-md;
+    border-right: 1px solid var(--border-subtle);
   }
 
   .glass-input {
-    @apply bg-slate-800/60 border border-white/[0.08] rounded-lg text-white placeholder-slate-500
-           focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 transition-all;
+    background-color: color-mix(in srgb, var(--bg-card) 90%, transparent);
+    @apply rounded-lg transition-all;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+  }
+  .glass-input::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.8;
+  }
+  .glass-input:focus {
+    @apply outline-none ring-2;
+    --tw-ring-color: rgb(59 130 246 / 0.4);
+    border-color: rgb(59 130 246 / 0.5);
   }
 
   .btn-primary {
@@ -79,7 +133,12 @@ body {
   }
 
   .btn-ghost {
-    @apply px-3 py-2 text-slate-400 hover:text-white hover:bg-white/[0.06] rounded-lg transition-all;
+    @apply px-3 py-2 rounded-lg transition-all;
+    color: var(--text-secondary);
+  }
+  .btn-ghost:hover {
+    color: var(--text-primary);
+    background-color: color-mix(in srgb, var(--border-subtle) 50%, transparent);
   }
 
   .stat-card {
@@ -92,13 +151,15 @@ body {
   }
 
   .dashboard-card {
-    @apply rounded-2xl border border-white/[0.06] bg-slate-800/50 backdrop-blur-sm;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 4px 24px -4px rgba(0, 0, 0, 0.2);
+    background-color: color-mix(in srgb, var(--bg-card) 80%, transparent);
+    @apply rounded-2xl backdrop-blur-sm;
+    border: 1px solid var(--border-subtle);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   }
 
   .dashboard-card:hover {
-    @apply border-white/[0.08];
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 32px -8px rgba(0, 0, 0, 0.25);
+    border-color: color-mix(in srgb, var(--border-subtle) 1.5, transparent);
+    box-shadow: 0 4px 24px -4px rgba(0, 0, 0, 0.15);
   }
 
   .badge {
@@ -110,11 +171,13 @@ body {
   }
 
   .page-title {
-    @apply text-2xl font-bold text-white tracking-tight;
+    @apply text-2xl font-bold tracking-tight;
+    color: var(--text-primary);
   }
 
   .page-subtitle {
-    @apply text-slate-400 mt-1 text-sm;
+    @apply mt-1 text-sm;
+    color: var(--text-secondary);
   }
 }
 
@@ -124,12 +187,17 @@ body {
 }
 
 .message-assistant {
-  @apply bg-slate-800/60 text-slate-100 rounded-2xl rounded-bl-sm border border-white/[0.06];
+  background-color: color-mix(in srgb, var(--bg-card) 85%, transparent);
+  color: var(--text-primary);
+  @apply rounded-2xl rounded-bl-sm;
+  border: 1px solid var(--border-subtle);
 }
 
 /* ── Markdown content ──────────────────────────────────────────────────────── */
 .markdown-content {
-  @apply max-w-none text-sm leading-relaxed text-slate-200;
+  @apply max-w-none text-sm leading-relaxed;
+  color: var(--text-primary);
+  --markdown-muted: color-mix(in srgb, var(--text-primary) 80%, transparent);
 }
 
 .markdown-content p {
@@ -137,7 +205,8 @@ body {
 }
 
 .markdown-content h1, .markdown-content h2, .markdown-content h3 {
-  @apply font-semibold text-white mb-2 mt-4;
+  @apply font-semibold mb-2 mt-4;
+  color: var(--text-primary);
 }
 
 .markdown-content ul, .markdown-content ol {
@@ -145,19 +214,26 @@ body {
 }
 
 .markdown-content li {
-  @apply text-slate-300;
+  color: var(--markdown-muted);
 }
 
 .markdown-content a {
-  @apply text-blue-400 hover:text-blue-300 underline;
+  @apply underline;
+  color: rgb(96 165 250);
+}
+.markdown-content a:hover {
+  color: rgb(147 197 253);
 }
 
 .markdown-content pre {
-  @apply bg-slate-900/60 rounded-lg p-4 overflow-x-auto border border-white/[0.06] mb-3;
+  background-color: color-mix(in srgb, var(--bg-card) 90%, transparent);
+  @apply rounded-lg p-4 overflow-x-auto mb-3;
+  border: 1px solid var(--border-subtle);
 }
 
 .markdown-content code {
-  @apply bg-slate-700/50 px-1.5 py-0.5 rounded text-sm;
+  background-color: color-mix(in srgb, var(--bg-card) 70%, transparent);
+  @apply px-1.5 py-0.5 rounded text-sm;
 }
 
 .markdown-content pre code {
@@ -165,7 +241,9 @@ body {
 }
 
 .markdown-content blockquote {
-  @apply border-l-2 border-slate-600 pl-4 text-slate-400 italic;
+  @apply border-l-2 pl-4 italic;
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
 }
 
 /* ── Animations ────────────────────────────────────────────────────────────── */
@@ -240,5 +318,5 @@ body {
   @apply transition-colors duration-150 cursor-pointer;
 }
 .table-row-hover:hover {
-  @apply bg-white/[0.03];
+  background-color: var(--bg-hover);
 }

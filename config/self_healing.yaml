@@ -1,0 +1,35 @@
+# Self-healing: catches ALL warnings/errors from logs, then applies patterns or LLM.
+# Filter: any line with "warning", "error", "exception", "traceback" → caught.
+# Pattern match → run remediation. No match → LLM analyzes and suggests fix.
+
+patterns:
+  - pattern: "ChromaDB not installed|No module named .chromadb."
+    action: install_chromadb
+    description: "Install ChromaDB"
+  - pattern: "whisper|No module named .whisper.|STT not initialized|transcription_failed"
+    action: install_whisper
+    description: "Install Whisper for speech-to-text"
+  - pattern: "protego|Failed to import protego"
+    action: install_protego
+    description: "Install protego (Cognee dependency)"
+  - pattern: "vite\\.svg.*404|404.*vite"
+    action: fix_vite_svg
+    description: "Add vite.svg and rebuild frontend"
+  - pattern: "python-lsl|No module named .lsl|pylsl"
+    action: install_pylsl
+    description: "Install pylsl (Lab Streaming Layer)"
+
+# For pip_install actions, map action_key -> package
+pip_packages:
+  install_chromadb: chromadb
+  install_whisper: openai-whisper
+  check_stt: openai-whisper
+  install_protego: "protego>=0.1"
+  install_pylsl: pylsl
+
+# LLM fallback: when no pattern matches, use LLM to analyze and suggest fix
+# code_edit: suggests code fixes; requires user approval before applying
+llm_fallback:
+  enabled: true
+  min_confidence: 0.7
+  allowed_actions: ["pip_install", "run_command", "code_edit"]

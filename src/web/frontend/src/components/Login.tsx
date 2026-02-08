@@ -28,7 +28,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a1120] flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)' }}>
       {/* Animated background orbs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="login-orb-1 absolute top-1/4 left-1/4 w-[400px] h-[400px] rounded-full bg-blue-600/[0.07] blur-[100px]" />
@@ -38,9 +38,9 @@ export default function Login() {
 
       {/* Grid pattern overlay */}
       <div
-        className="absolute inset-0 opacity-[0.02]"
+        className="absolute inset-0 opacity-30"
         style={{
-          backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
+          backgroundImage: 'linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px)',
           backgroundSize: '60px 60px',
         }}
       />
@@ -51,10 +51,10 @@ export default function Login() {
           <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-purple-600 flex items-center justify-center mb-5 shadow-lg shadow-blue-500/25 animate-float">
             <Bot className="w-9 h-9 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">
+          <h1 className="text-2xl font-bold tracking-tight text-theme-primary">
             Aria Control Center
           </h1>
-          <p className="text-slate-500 mt-2 text-sm">Sign in to access your AI assistant</p>
+          <p className="text-theme-secondary mt-2 text-sm">Sign in to access your AI assistant</p>
         </div>
 
         {/* Login form */}
@@ -72,7 +72,7 @@ export default function Login() {
             <div>
               <label
                 htmlFor="username"
-                className="block text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider"
+                className="block text-xs font-medium text-theme-secondary mb-2 uppercase tracking-wider"
               >
                 Username
               </label>
@@ -91,7 +91,7 @@ export default function Login() {
             <div>
               <label
                 htmlFor="password"
-                className="block text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider"
+                className="block text-xs font-medium text-theme-secondary mb-2 uppercase tracking-wider"
               >
                 Password
               </label>
@@ -126,7 +126,7 @@ export default function Login() {
           </button>
         </form>
 
-        <p className="text-center text-slate-600 text-xs mt-6">
+        <p className="text-center text-theme-secondary text-xs mt-6">
           Default credentials: admin / admin
         </p>
       </div>

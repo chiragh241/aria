@@ -72,7 +72,7 @@ export default function Logs() {
       label: 'Total Events',
       value: stats?.total_entries ?? 0,
       icon: Activity,
-      color: 'text-white',
+      color: 'text-theme-primary',
       accent: 'from-blue-500',
     },
     {
@@ -187,22 +187,22 @@ export default function Logs() {
         </select>
 
         {isFetching && !isLoading && (
-          <Loader2 className="w-4 h-4 animate-spin text-slate-600" />
+          <Loader2 className="w-4 h-4 animate-spin text-theme-secondary" />
         )}
       </div>
 
       {/* Log entries */}
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 className="w-6 h-6 animate-spin text-slate-600" />
+          <Loader2 className="w-6 h-6 animate-spin text-theme-secondary" />
         </div>
       ) : !isError && data?.length === 0 ? (
         <div className="glass-card p-12 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-slate-800/50 border border-white/[0.06] flex items-center justify-center mx-auto mb-5">
-            <Clock className="w-8 h-8 text-slate-600" />
+          <div className="w-16 h-16 rounded-2xl card-theme border border-theme flex items-center justify-center mx-auto mb-5">
+            <Clock className="w-8 h-8 text-theme-secondary" />
           </div>
           <p className="text-lg font-medium text-slate-300 mb-1">No log entries yet</p>
-          <p className="text-sm text-slate-600 max-w-sm mx-auto">
+          <p className="text-sm text-theme-secondary max-w-sm mx-auto">
             {filter
               ? `No "${filter.replace(/_/g, ' ')}" events found. Try changing the filter.`
               : 'Audit logs will appear here as Aria processes requests.'}
@@ -210,7 +210,7 @@ export default function Logs() {
           {filter && (
             <button
               onClick={() => setFilter('')}
-              className="mt-4 px-4 py-2 bg-slate-800/60 hover:bg-slate-700/60 text-white rounded-lg transition-colors text-sm border border-white/[0.06]"
+              className="mt-4 px-4 py-2 btn-theme-secondary hover:bg-theme-muted rounded-lg transition-colors text-sm border border-theme"
             >
               Clear Filter
             </button>
@@ -220,7 +220,7 @@ export default function Logs() {
         <div className="glass-card overflow-hidden">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-white/[0.06]">
+              <tr className="border-b border-theme">
                 <th className="text-left px-4 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                   Time
                 </th>
@@ -254,35 +254,35 @@ export default function Logs() {
                       expandedRow === entry.id ? 'bg-white/[0.02]' : ''
                     }`}
                   >
-                    <td className="px-4 py-3 text-xs text-slate-400 font-mono">
+                    <td className="px-4 py-3 text-xs text-theme-secondary font-mono">
                       {format(new Date(entry.timestamp), 'MMM d, HH:mm:ss')}
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                          eventColors[entry.event] || 'bg-slate-800/50 text-slate-400 border border-white/[0.06]'
+                          eventColors[entry.event] || 'card-theme text-theme-secondary border border-theme'
                         }`}
                       >
                         {entry.event.replace(/_/g, ' ')}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-400">
+                    <td className="px-4 py-3 text-xs text-theme-secondary">
                       {entry.action_type?.replace(/_/g, ' ') || '-'}
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-400">
+                    <td className="px-4 py-3 text-xs text-theme-secondary">
                       {entry.user_id || '-'}
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-400">
+                    <td className="px-4 py-3 text-xs text-theme-secondary">
                       {entry.channel || '-'}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`text-xs ${statusColors[entry.status] || 'text-slate-400'}`}>
+                      <span className={`text-xs ${statusColors[entry.status] || 'text-theme-secondary'}`}>
                         {entry.status}
                       </span>
                     </td>
                     <td className="px-4 py-3">
                       <ChevronDown
-                        className={`w-3.5 h-3.5 text-slate-600 transition-transform ${
+                        className={`w-3.5 h-3.5 text-theme-secondary transition-transform ${
                           expandedRow === entry.id ? 'rotate-180' : ''
                         }`}
                       />
@@ -290,7 +290,7 @@ export default function Logs() {
                   </tr>
                   {expandedRow === entry.id && entry.details && Object.keys(entry.details).length > 0 && (
                     <tr key={`${entry.id}-details`}>
-                      <td colSpan={7} className="px-4 py-3 bg-slate-900/40 border-b border-white/[0.03]">
+                      <td colSpan={7} className="px-4 py-3 card-theme border-b border-white/[0.03]">
                         <pre className="text-[11px] text-slate-500 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed">
                           {JSON.stringify(entry.details, null, 2)}
                         </pre>

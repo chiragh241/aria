@@ -5,7 +5,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ...utils.logging import get_logger
 from ..base import BaseSkill, SkillResult
+
+logger = get_logger(__name__)
 
 
 class STTSkill(BaseSkill):
@@ -61,19 +64,24 @@ class STTSkill(BaseSkill):
         try:
             import whisper
 
-            # Load model (this may take a moment)
+            logger.info("STT: loading Whisper model", model=self.model_name)
             self._model = whisper.load_model(self.model_name)
             self._initialized = True
-        except ImportError:
+            logger.info("STT: Whisper model loaded")
+        except ImportError as e:
+            logger.error("STT: whisper not installed", error=str(e))
             self._initialized = False
-        except Exception:
+        except Exception as e:
+            logger.error("STT: failed to load model", error=str(e), exc_info=True)
             self._initialized = False
 
     async def execute(self, capability: str, **kwargs: Any) -> SkillResult:
         """Execute an STT capability."""
         start_time = datetime.now(timezone.utc)
+        logger.info("STT: execute", capability=capability, has_audio=bool(kwargs.get("audio_data")))
 
         if not self._initialized:
+            logger.warning("STT: not initialized — whisper not loaded")
             return self._error_result(
                 "STT not initialized. Install whisper: pip install openai-whisper",
                 start_time,
@@ -146,25 +154,29 @@ class STTSkill(BaseSkill):
         try:
             import base64
 
-            # Decode audio data
             audio_bytes = base64.b64decode(audio_data)
+            logger.info("STT: transcribe_bytes", format=format, size_bytes=len(audio_bytes))
 
-            # Save to temp file
             with tempfile.NamedTemporaryFile(suffix=f".{format}", delete=False) as f:
                 f.write(audio_bytes)
                 temp_path = f.name
 
             try:
-                return await self._transcribe(
+                result = await self._transcribe(
                     start_time,
                     audio_path=temp_path,
                     language=language,
                 )
+                if result.success:
+                    logger.info("STT: transcribe_bytes success")
+                else:
+                    logger.warning("STT: transcribe_bytes failed", error=result.error)
+                return result
             finally:
-                # Clean up temp file
                 Path(temp_path).unlink(missing_ok=True)
 
         except Exception as e:
+            logger.error("STT: transcribe_bytes error", error=str(e), exc_info=True)
             return self._error_result(str(e), start_time)
 
     async def shutdown(self) -> None:

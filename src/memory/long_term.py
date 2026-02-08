@@ -67,12 +67,14 @@ class LongTermMemory:
 
         try:
             import chromadb
+            from chromadb.config import Settings as ChromaSettings
 
             persist_path = str(Path(self._persist_dir).expanduser())
 
-            # Use the new PersistentClient API
+            # Use same ChromaSettings as vector_store.py to avoid "already exists with different settings"
             self._client = chromadb.PersistentClient(
                 path=persist_path,
+                settings=ChromaSettings(anonymized_telemetry=False),
             )
 
             self._collection = self._client.get_or_create_collection(

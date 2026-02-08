@@ -8,6 +8,23 @@ const api = axios.create({
   },
 });
 
+// Request interceptor: add token from persisted auth (avoids 401 race on rehydration)
+api.interceptors.request.use((config) => {
+  try {
+    const stored = localStorage.getItem('aria-auth');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      const token = parsed?.state?.token ?? parsed?.token;
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return config;
+});
+
 // Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
@@ -24,6 +41,11 @@ api.interceptors.response.use(
 export default api;
 
 // API functions
+export const userApi = {
+  getProfile: () =>
+    api.get('/user/profile'),
+};
+
 export const chatApi = {
   sendMessage: (content: string) =>
     api.post('/chat/message', { content, channel: 'web' }),
@@ -181,6 +203,11 @@ export const channelsApi = {
 export const transcribeApi = {
   transcribe: (audio: string, format: string = 'webm') =>
     api.post('/chat/transcribe', { audio, format }),
+};
+
+export const logApi = {
+  event: (event: string, details?: Record<string, unknown>) =>
+    api.post('/log/event', { event, details: details || {} }),
 };
 
 export const restartApi = {
