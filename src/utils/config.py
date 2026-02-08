@@ -158,12 +158,24 @@ class EpisodicMemoryConfig(BaseModel):
     summary_threshold: int = 10
 
 
+class KnowledgeGraphConfig(BaseModel):
+    """Knowledge graph (Cognee) configuration."""
+
+    enabled: bool = True
+    provider: str = "cognee"
+    auto_process_after_ingest: bool = False
+
+
 class MemoryConfig(BaseModel):
     """Combined memory configuration."""
 
     short_term: ShortTermMemoryConfig = Field(default_factory=ShortTermMemoryConfig)
     long_term: LongTermMemoryConfig = Field(default_factory=LongTermMemoryConfig)
     episodic: EpisodicMemoryConfig = Field(default_factory=EpisodicMemoryConfig)
+    knowledge_graph: KnowledgeGraphConfig = Field(default_factory=KnowledgeGraphConfig)
+    user_profiles_enabled: bool = True
+    entity_extraction_enabled: bool = True
+    auto_summarize: bool = True
 
 
 class DatabaseConfig(BaseModel):
@@ -214,6 +226,16 @@ class BuiltinSkillsConfig(BaseModel):
     image: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
     video: dict[str, Any] = Field(default_factory=lambda: {"enabled": True, "ffmpeg_path": "ffmpeg"})
     documents: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    memory: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    weather: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    news: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    finance: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    contacts: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    tracking: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    home: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
+    webhook: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
+    agent: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    research: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
 
 
 class LearnedSkillsConfig(BaseModel):
@@ -249,6 +271,28 @@ class DashboardConfig(BaseModel):
     )
 
 
+class ProactiveConfig(BaseModel):
+    """Proactive intelligence configuration."""
+
+    enabled: bool = True
+    morning_briefing: bool = True
+    briefing_time: str = "08:00"
+    briefing_channel: str = ""
+    follow_up_tracking: bool = True
+    suggestions_enabled: bool = False
+
+
+class AgentsConfig(BaseModel):
+    """Autonomous agents configuration."""
+
+    enabled: bool = True
+    max_concurrent: int = 3
+    timeout_seconds: int = 300
+    research_enabled: bool = True
+    coding_enabled: bool = True
+    data_enabled: bool = True
+
+
 class Settings(BaseSettings):
     """Main settings class that loads from YAML and environment variables."""
 
@@ -269,6 +313,8 @@ class Settings(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
+    proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
+    agents: AgentsConfig = Field(default_factory=AgentsConfig)
 
     # API keys from environment
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")

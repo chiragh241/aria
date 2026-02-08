@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..utils.config import get_settings
 from ..utils.logging import get_logger
@@ -11,6 +11,9 @@ from .long_term import LongTermMemory, SearchResult
 from .cognee_graph import CogneeGraphMemory
 
 logger = get_logger(__name__)
+
+if TYPE_CHECKING:
+    from .user_profile import UserProfile
 
 
 @dataclass
@@ -150,6 +153,10 @@ class RAGPipeline:
         # Also feed into knowledge graph for entity/relationship extraction
         if self._cognee.is_available():
             await self._cognee.add_knowledge(document.content)
+            # Auto-process if enabled (runs in background to avoid blocking)
+            if self.settings.memory.knowledge_graph.auto_process_after_ingest:
+                import asyncio
+                asyncio.create_task(self._auto_process_knowledge())
 
         logger.debug(
             "Ingested document",
@@ -158,6 +165,14 @@ class RAGPipeline:
         )
 
         return len(chunks)
+
+    async def _auto_process_knowledge(self) -> None:
+        """Background task to process knowledge graph after ingestion."""
+        try:
+            await self.process_knowledge_graph()
+            logger.info("Knowledge graph auto-processed after ingestion")
+        except Exception as e:
+            logger.warning("Knowledge graph auto-process failed", error=str(e))
 
     async def ingest_file(
         self,
@@ -396,6 +411,27 @@ class RAGPipeline:
         return await self._memory.delete_many(
             where={"source": source}
         )
+
+    async def add_user_profile_to_knowledge(
+        self,
+        user_id: str,
+        profile: "UserProfile",
+    ) -> bool:
+        """
+        Sync user profile into the knowledge graph.
+        Keeps Cognee in sync with user profiles so graph search can find
+        preferences, relationships, and facts alongside ingested documents.
+
+        Args:
+            user_id: User identifier
+            profile: User profile object
+
+        Returns:
+            True if content was added
+        """
+        if not self._cognee.is_available():
+            return False
+        return await self._cognee.add_user_profile_knowledge(user_id, profile)
 
     async def process_knowledge_graph(self) -> bool:
         """Trigger cognee to process accumulated knowledge into the graph."""

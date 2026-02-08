@@ -80,8 +80,71 @@ class Orchestrator:
         # Optional: vector memory (set externally)
         self._vector_memory: Any = None
 
+        # User profile, entity extraction, summarizer (Phase 1)
+        self._user_profile_manager: Any = None
+        self._entity_extractor: Any = None
+        self._summarizer: Any = None
+
+        # Sentiment and personality (Phase 5)
+        self._sentiment_analyzer: Any = None
+        self._personality_adapter: Any = None
+
         # Running state
         self._running = False
+
+    def set_user_profile_manager(self, pm: Any) -> None:
+        self._user_profile_manager = pm
+
+    def set_entity_extractor(self, ee: Any) -> None:
+        self._entity_extractor = ee
+
+    async def _extract_and_update_profile(
+        self,
+        user_id: str,
+        user_content: str,
+        assistant_content: str = "",
+    ) -> None:
+        """
+        Automatically extract and persist profile updates from every interaction.
+        Runs on user message (+ optional assistant response) — no explicit skill call needed.
+        Syncs profile to Cognee knowledge graph when enabled.
+        """
+        if not self.settings.memory.entity_extraction_enabled:
+            return
+        if not self._entity_extractor or not self._user_profile_manager:
+            return
+        try:
+            # Profile updates (preferred_name, important_people, preferences, etc.)
+            updates = self._entity_extractor.extract_profile_updates(user_content)
+            if updates:
+                self._user_profile_manager.update_profile(user_id, **updates)
+                logger.debug("Auto-updated profile from interaction", user_id=user_id, keys=list(updates.keys()))
+
+            # Facts to remember (from conversation context)
+            facts = self._entity_extractor.extract_facts_from_conversation(user_content, assistant_content)
+            for fact in facts:
+                self._user_profile_manager.add_fact(user_id, fact)
+                logger.debug("Auto-added fact from interaction", user_id=user_id, fact_preview=fact[:50])
+
+            # Sync profile to Cognee when knowledge graph enabled (Cognee + user profiles work together)
+            if updates or facts:
+                if (
+                    self._rag_pipeline
+                    and self.settings.memory.knowledge_graph.enabled
+                ):
+                    profile = self._user_profile_manager.get_profile(user_id)
+                    await self._rag_pipeline.add_user_profile_to_knowledge(user_id, profile)
+        except Exception as e:
+            logger.debug("Profile extraction failed", user_id=user_id, error=str(e))
+
+    def set_summarizer(self, s: Any) -> None:
+        self._summarizer = s
+
+    def set_sentiment_analyzer(self, sa: Any) -> None:
+        self._sentiment_analyzer = sa
+
+    def set_personality_adapter(self, pa: Any) -> None:
+        self._personality_adapter = pa
 
     async def initialize(self) -> None:
         """Initialize the orchestrator."""
@@ -248,6 +311,27 @@ class Orchestrator:
         # Add user message to context
         context.add_user_message(content)
 
+        # Handle slash commands (/help, /clear, /status, /skills)
+        if content.strip().startswith("/"):
+            response_content = await self._handle_slash_command(
+                channel=channel,
+                user_id=user_id,
+                content=content,
+                context=context,
+            )
+            if response_content is not None:
+                context.add_assistant_message(response_content)
+                await self.context_manager.trim_context(context)
+                return response_content
+
+        # Handle "what can you do" type queries with detailed capabilities list
+        if self._is_capabilities_query(content):
+            response_content = self._get_capabilities_detail()
+            context.add_assistant_message(response_content)
+            await self._extract_and_update_profile(user_id, content, response_content)
+            await self.context_manager.trim_context(context)
+            return response_content
+
         # Emit message_received event
         await self._event_bus.emit("message_received", {
             "channel": channel,
@@ -306,6 +390,28 @@ class Orchestrator:
                 role="user",
                 content=messages[-1].content + extra_context,
             )
+
+        # Inject user profile context (Phase 1)
+        if self._user_profile_manager and self.settings.memory.user_profiles_enabled:
+            profile_context = self._user_profile_manager.get_context_for_llm(user_id)
+            if profile_context and messages and messages[0].role == "system":
+                messages[0] = LLMMessage(
+                    role="system",
+                    content=messages[0].content + profile_context,
+                )
+
+        # Sentiment + personality adaptation (Phase 5)
+        if self._sentiment_analyzer and self._personality_adapter and messages and messages[0].role == "system":
+            sentiment = self._sentiment_analyzer.analyze(content, user_id)
+            user_profile = (
+                self._user_profile_manager.get_profile(user_id)
+                if self._user_profile_manager
+                else None
+            )
+            adapted = self._personality_adapter.adapt_system_prompt(
+                messages[0].content, sentiment, channel, user_profile
+            )
+            messages[0] = LLMMessage(role="system", content=adapted)
 
         # Search vector memory for relevant past conversations
         if self._vector_memory and self._vector_memory.available:
@@ -466,6 +572,9 @@ class Orchestrator:
                 details={"response_preview": final_content[:100] if final_content else ""},
             )
 
+            # Auto-extract and update profile from every interaction (no explicit skill needed)
+            await self._extract_and_update_profile(user_id, content, final_content)
+
             return final_content
 
         except Exception as e:
@@ -507,6 +616,18 @@ class Orchestrator:
             if response:
                 context.add_assistant_message(response.content)
                 return response
+
+        # Handle "what can you do" type queries with detailed capabilities list
+        if self._is_capabilities_query(message.content):
+            response_content = self._get_capabilities_detail()
+            context.add_assistant_message(response_content)
+            await self._extract_and_update_profile(
+                message.user_id,
+                message.content,
+                response_content,
+            )
+            await self.context_manager.trim_context(context)
+            return OrchestratorResponse(content=response_content)
 
         # Get relevant context from RAG if available
         rag_context = ""
@@ -577,6 +698,13 @@ class Orchestrator:
         # Trim context if needed
         await self.context_manager.trim_context(context)
 
+        # Auto-extract and update profile from every interaction (Slack, WhatsApp, etc.)
+        await self._extract_and_update_profile(
+            message.user_id,
+            message.content,
+            response.content,
+        )
+
         return OrchestratorResponse(
             content=response.content,
             metadata={
@@ -586,44 +714,128 @@ class Orchestrator:
             },
         )
 
+    async def _handle_slash_command(
+        self,
+        channel: str,
+        user_id: str,
+        content: str,
+        context: ConversationContext,
+    ) -> str | None:
+        """Handle slash commands. Returns response text or None if not a recognized command."""
+        parts = content.strip().split(maxsplit=1)
+        command = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
+
+        if command == "/help":
+            return self._get_help_text()
+
+        elif command == "/clear":
+            await self.context_manager.clear_context(
+                channel=channel,
+                user_id=user_id,
+            )
+            return "Conversation cleared. Starting fresh!"
+
+        elif command == "/status":
+            return self._get_status()
+
+        elif command == "/skills":
+            return self._get_skills_list()
+
+        elif command == "/capabilities":
+            return self._get_capabilities_detail()
+
+        # Not a recognized command, let LLM handle it
+        return None
+
     async def _handle_command(
         self,
         message: QueuedMessage,
         context: ConversationContext,
     ) -> OrchestratorResponse | None:
-        """Handle slash commands."""
-        parts = message.content.split(maxsplit=1)
-        command = parts[0].lower()
-        args = parts[1] if len(parts) > 1 else ""
-
-        if command == "/help":
-            return OrchestratorResponse(
-                content=self._get_help_text(),
-            )
-
-        elif command == "/clear":
-            await self.context_manager.clear_context(
-                channel=message.channel,
-                user_id=message.user_id,
-            )
-            return OrchestratorResponse(
-                content="Conversation cleared. Starting fresh!",
-            )
-
-        elif command == "/status":
-            status = self._get_status()
-            return OrchestratorResponse(
-                content=status,
-            )
-
-        elif command == "/skills":
-            skills = self._get_skills_list()
-            return OrchestratorResponse(
-                content=skills,
-            )
-
-        # Not a recognized command, let LLM handle it
+        """Handle slash commands (used by message router for Slack, WhatsApp, etc.)."""
+        response = await self._handle_slash_command(
+            channel=message.channel,
+            user_id=message.user_id,
+            content=message.content,
+            context=context,
+        )
+        if response is not None:
+            return OrchestratorResponse(content=response)
         return None
+
+    def _is_capabilities_query(self, content: str) -> bool:
+        """Check if the user is asking what Aria can do."""
+        lower = content.lower().strip()
+        patterns = [
+            "what can you do",
+            "what can you help with",
+            "what are your capabilities",
+            "what are your skills",
+            "what do you do",
+            "show me your capabilities",
+            "list your capabilities",
+            "list your skills",
+            "what abilities do you have",
+            "what can i ask you",
+            "how can you help",
+            "what are you capable of",
+        ]
+        return any(p in lower for p in patterns)
+
+    def _get_capabilities_detail(self) -> str:
+        """Build a detailed list of skills and how to trigger them."""
+        if not self._skill_registry:
+            return "No skills are available right now."
+
+        lines = [
+            "**Here's what I can do** — skills and how to trigger them:\n",
+        ]
+
+        for skill_info in self._skill_registry.list_skills():
+            if not skill_info.get("enabled", True):
+                continue
+
+            skill = self._skill_registry.get_skill(skill_info["name"])
+            if not skill:
+                continue
+
+            caps = skill.get_capabilities()
+            if not caps:
+                continue
+
+            skill_name = skill.name
+            skill_desc = skill_info.get("description", skill.description or "")
+
+            lines.append(f"### {skill_name.replace('_', ' ').title()}")
+            lines.append(f"_{skill_desc}_\n")
+
+            for cap in caps:
+                cap_name = cap.get("name", "")
+                cap_desc = cap.get("description", "")
+
+                # Extract trigger examples from description (e.g. "Use for 'X', 'Y'")
+                trigger = ""
+                if "use for" in cap_desc.lower():
+                    # Extract the part after "Use for"
+                    idx = cap_desc.lower().find("use for")
+                    trigger = cap_desc[idx:].strip()
+                elif "e.g." in cap_desc.lower():
+                    idx = cap_desc.lower().find("e.g.")
+                    trigger = cap_desc[idx:].strip()
+                else:
+                    human = cap_name.replace("_", " ").replace("-", " ")
+                    trigger = f"Just ask naturally — e.g. \"{human}\" or describe what you need"
+
+                lines.append(f"- **{cap_name}**: {cap_desc}")
+                lines.append(f"  → Trigger: {trigger}\n")
+
+            lines.append("")
+
+        lines.append("**Commands:** /help • /clear • /status • /skills")
+        lines.append("\nJust ask in plain language — I'll use the right skill automatically.")
+
+        return "\n".join(lines)
 
     def _get_help_text(self) -> str:
         """Get help text for available commands."""
@@ -633,6 +845,7 @@ class Orchestrator:
 /clear - Clear conversation history
 /status - Show system status
 /skills - List available skills
+/capabilities - Detailed list of skills and how to trigger them
 
 **Capabilities:**
 - File operations (read, write, search)
@@ -1091,6 +1304,31 @@ Just ask me what you need help with!"""
             return
 
         context.add_user_message(content)
+
+        # Handle slash commands
+        if content.strip().startswith("/"):
+            response_content = await self._handle_slash_command(
+                channel=channel,
+                user_id=user_id,
+                content=content,
+                context=context,
+            )
+            if response_content is not None:
+                context.add_assistant_message(response_content)
+                await self._extract_and_update_profile(user_id, content, response_content)
+                await self.context_manager.trim_context(context)
+                yield response_content
+                return
+
+        # Handle "what can you do" with full response (no streaming needed)
+        if self._is_capabilities_query(content):
+            response_content = self._get_capabilities_detail()
+            context.add_assistant_message(response_content)
+            await self._extract_and_update_profile(user_id, content, response_content)
+            await self.context_manager.trim_context(context)
+            yield response_content
+            return
+
         messages = context.get_messages()
         task_type = self._classify_task(content)
 
@@ -1103,4 +1341,7 @@ Just ask me what you need help with!"""
             yield chunk
 
         context.add_assistant_message(full_response)
+
+        # Auto-extract and update profile from every interaction
+        await self._extract_and_update_profile(user_id, content, full_response)
         await self.context_manager.trim_context(context)

@@ -5,13 +5,17 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
 ## Features
 
 - **Hybrid LLM**: Routes simple tasks to local Ollama, complex reasoning to Claude API
+- **Smart Ollama Setup**: Hardware-detection during onboarding suggests the best model for your machine; can download it for you
 - **Multi-Channel**: Slack, WhatsApp (via web bridge), and Web UI
 - **Security**: Configurable profiles (paranoid, balanced, trusted) with approval workflows
 - **Sandboxed Execution**: Docker isolation for untrusted code
-- **Memory**: Short-term conversation, long-term vector store (ChromaDB), episodic task history
-- **11 Built-in Skills**: File ops, shell, browser, calendar, email, SMS, TTS, STT, image, video, documents
+- **Memory**: Short-term conversation, long-term vector store (ChromaDB), episodic task history, user profiles
+- **Knowledge Graph**: Cognee integration for entity/relationship extraction—synced with user profiles
+- **20+ Built-in Skills**: File ops, shell, browser, calendar, email, SMS, TTS, STT, image, video, documents, weather, research, agent, memory, finance, news, contacts, tracking, webhook, home
 - **Dynamic Skills**: AI can generate new skills on demand
-- **Web Dashboard**: Full React UI for chat, approvals, settings, and logs
+- **Web Dashboard**: Full React UI for chat, approvals, settings, logs, skills
+- **Slash Commands**: `/help`, `/clear`, `/status`, `/skills`, `/capabilities` in web chat and all channels
+- **"What can you do"**: Ask in plain language for a detailed list of skills and how to trigger them
 
 ## Quick Start
 
@@ -31,25 +35,31 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
    uv pip install -e .
    ```
 
-2. **Set up environment**:
+2. **Run setup wizard** (recommended):
+   ```bash
+   python -m src.main --setup
+   ```
+   The wizard configures LLM providers, channels, and more. When you choose Ollama, it detects your hardware (RAM, GPU) and suggests the best model—optionally downloading it for you.
+
+3. **Set up environment**:
    ```bash
    cp .env.example .env
    # Edit .env with your API keys
    ```
 
-3. **Install frontend dependencies**:
+4. **Install frontend dependencies**:
    ```bash
    cd src/web/frontend
    npm install
    ```
 
-4. **(Optional) Set up WhatsApp bridge**:
+5. **(Optional) Set up WhatsApp bridge** (if enabled in setup):
    ```bash
    cd whatsapp-bridge
    npm install
    ```
 
-5. **(Optional) Pull Ollama models**:
+6. **(Optional) Ollama models**: If you skipped the setup wizard, pull a model manually:
    ```bash
    ollama pull llama3.2:8b
    ```
@@ -78,7 +88,18 @@ Edit `config/settings.yaml` to customize:
 - LLM providers and models
 - Channel settings (Slack, WhatsApp, Web)
 - Security profile
-- Memory and sandbox options
+- Memory, knowledge graph (Cognee), and sandbox options
+
+### Web Chat Commands
+
+In the web chat (and Slack/WhatsApp), you can use:
+- `/help` — Show available commands
+- `/clear` — Clear conversation history
+- `/status` — System status
+- `/skills` — List skills
+- `/capabilities` — Detailed skills and how to trigger them
+
+Or ask **"What can you do?"** for a full capabilities list.
 
 ## Architecture
 
@@ -131,12 +152,16 @@ aria/
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/chat` | POST | Send message |
+| `/api/auth/login` | POST | Login |
+| `/api/chat/message` | POST | Send message |
 | `/api/chat/history` | GET | Get chat history |
 | `/api/approvals/pending` | GET | List pending approvals |
-| `/api/approvals/{id}` | POST | Respond to approval |
+| `/api/approvals/respond` | POST | Respond to approval |
 | `/api/skills` | GET | List skills |
-| `/api/settings` | GET/PUT | Get/update settings |
+| `/api/config` | GET | Get full config |
+| `/api/config/llm` | PUT | Update LLM config |
+| `/api/config/memory` | PUT | Update memory config |
+| `/api/knowledge/process` | POST | Process knowledge graph |
 | `/api/audit` | GET | Get audit log |
 
 ## License

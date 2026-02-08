@@ -71,6 +71,13 @@ sandbox:
   - date
   - echo
 memory:
+  user_profiles_enabled: true
+  entity_extraction_enabled: true
+  auto_summarize: true
+  knowledge_graph:
+    enabled: true
+    provider: cognee
+    auto_process_after_ingest: false
   short_term:
     max_messages: 50
     max_tokens: 8000
@@ -95,6 +102,20 @@ logging:
   max_size_mb: 100
   backup_count: 5
   audit_file: ./data/logs/audit.log
+proactive:
+  enabled: true
+  morning_briefing: true
+  briefing_time: "08:00"
+  briefing_channel: ""
+  follow_up_tracking: true
+  suggestions_enabled: false
+agents:
+  enabled: true
+  max_concurrent: 3
+  timeout_seconds: 300
+  research_enabled: true
+  coding_enabled: true
+  data_enabled: true
 skills:
   builtin:
     filesystem:
@@ -127,6 +148,26 @@ skills:
       enabled: true
       ffmpeg_path: ffmpeg
     documents:
+      enabled: true
+    memory:
+      enabled: true
+    weather:
+      enabled: true
+    news:
+      enabled: true
+    finance:
+      enabled: true
+    contacts:
+      enabled: true
+    tracking:
+      enabled: true
+    home:
+      enabled: false
+    webhook:
+      enabled: false
+    agent:
+      enabled: true
+    research:
       enabled: true
   learned:
     enabled: true

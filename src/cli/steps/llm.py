@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from typing import TYPE_CHECKING
 
 import questionary
@@ -10,11 +11,20 @@ from rich.panel import Panel
 from rich.table import Table
 
 from src.cli.detection import SystemDetector
+from src.cli.hardware import (
+    best_downloaded_model,
+    detect_hardware,
+    format_hardware_summary,
+    get_suggested_models,
+    recommend_ollama_model,
+)
 from src.cli.styles import (
     ERROR,
     ICON_ARROW,
     ICON_CHECK,
     ICON_CROSS,
+    ICON_GEAR,
+    ICON_STAR,
     ICON_WARN,
     MUTED,
     PANEL_BORDER,
@@ -228,7 +238,7 @@ def _configure_anthropic(
 def _configure_ollama(
     console: Console, state: WizardState, detection: DetectionResults
 ) -> bool:
-    """Configure Ollama local LLM."""
+    """Configure Ollama local LLM with hardware-based model suggestions."""
     console.print(f"\n[{PRIMARY}]Ollama Configuration[/{PRIMARY}]")
 
     if not detection.ollama.installed:
@@ -250,36 +260,78 @@ def _configure_ollama(
         console.print(f"  [{WARNING}]{ICON_WARN}[/{WARNING}] Ollama is installed but not running.")
         console.print(f"  [{MUTED}]Start it with: ollama serve")
 
-    # Select model
+    # Run hardware detection and suggest models
+    specs = detect_hardware()
     available_models = detection.ollama.extra.get("models", [])
 
-    if available_models:
-        console.print(f"  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] Found {len(available_models)} local model(s)")
-
-        model_choices = [questionary.Choice(m, value=m) for m in available_models]
-        model_choices.append(questionary.Choice("Pull a different model...", value="_pull"))
-
-        model = questionary.select(
-            "Which Ollama model should Aria use?",
-            choices=model_choices,
-        ).ask()
-
-        if model is None:
-            return False
-
-        if model == "_pull":
-            model = _pull_model(console)
-            if not model:
-                return False
+    # Prefer best downloaded model if it fits and beats tier recommendation
+    best_dl, best_dl_reason = best_downloaded_model(available_models, specs)
+    if best_dl:
+        recommended_model, reason = best_dl, best_dl_reason
     else:
-        console.print(f"  [{MUTED}]No local models found.")
+        recommended_model, reason = recommend_ollama_model(specs)
+
+    suggested = get_suggested_models(specs)
+
+    console.print()
+    console.print(
+        Panel(
+            f"[{PRIMARY}]Your hardware:[/{PRIMARY}] {format_hardware_summary(specs)}\n"
+            f"[{SUCCESS}]{ICON_STAR} Recommended:[/{SUCCESS}] {recommended_model} — {reason}",
+            title=f"{ICON_GEAR} Hardware detected",
+            border_style=PANEL_BORDER,
+            box=PANEL_BOX,
+        )
+    )
+    console.print()
+
+    # Build model choices: available + suggested (with download indicator)
+    model_choices: list[questionary.Choice] = []
+
+    for model_name, is_rec in suggested:
+        is_recommended = is_rec or (model_name == recommended_model)
+        if model_name in available_models:
+            title = f"{model_name} {'(Recommended)' if is_recommended else ''}"
+            model_choices.append(questionary.Choice(title, value=model_name))
+        else:
+            suffix = " (Recommended — will be downloaded)" if is_recommended else " (will be downloaded)"
+            model_choices.append(
+                questionary.Choice(f"{model_name}{suffix}", value=f"_pull:{model_name}")
+            )
+
+    # Add already-downloaded models not in suggested list
+    for m in available_models:
+        if not any(c.value == m for c in model_choices):
+            title = f"{m} (Recommended)" if m == recommended_model else m
+            model_choices.append(questionary.Choice(title, value=m))
+
+    model_choices.append(questionary.Choice("Enter a different model name...", value="_pull"))
+
+    model = questionary.select(
+        "Which Ollama model should Aria use?",
+        choices=model_choices,
+    ).ask()
+
+    if model is None:
+        return False
+
+    if model == "_pull":
         model = _pull_model(console)
         if not model:
-            # Use a default
-            model = "llama3.2:latest"
-            console.print(f"  [{MUTED}]{ICON_ARROW} Will use {model} (pull it later with: ollama pull {model})")
+            return False
+        if model not in available_models:
+            if _confirm_and_pull_model(console, model):
+                state.ollama_model = model
+            else:
+                state.ollama_model = model  # Use anyway, user can pull later
+    elif model.startswith("_pull:"):
+        model = model.split(":", 1)[1]
+        if model not in available_models:
+            _confirm_and_pull_model(console, model)
+        state.ollama_model = model
+    else:
+        state.ollama_model = model
 
-    state.ollama_model = model
     state.ollama_enabled = True
 
     # Base URL
@@ -293,6 +345,38 @@ def _configure_ollama(
 
     state.ollama_base_url = base_url
     return True
+
+
+def _confirm_and_pull_model(console: Console, model: str) -> bool:
+    """Offer to download the model and run ollama pull. Returns True if pull succeeded."""
+    do_pull = questionary.confirm(
+        f"Download {model} now? (This may take a few minutes)",
+        default=True,
+    ).ask()
+
+    if not do_pull:
+        console.print(f"  [{MUTED}]{ICON_ARROW} You can pull it later with: ollama pull {model}")
+        return False
+
+    console.print(f"  [{MUTED}]{ICON_GEAR} Pulling {model}...")
+    try:
+        result = subprocess.run(
+            ["ollama", "pull", model],
+            capture_output=False,
+            text=True,
+            timeout=3600,
+        )
+        if result.returncode == 0:
+            console.print(f"  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] {model} downloaded successfully")
+            return True
+        console.print(f"  [{WARNING}]{ICON_WARN}[/{WARNING}] Pull failed. Use: ollama pull {model}")
+        return False
+    except subprocess.TimeoutExpired:
+        console.print(f"  [{WARNING}]{ICON_WARN}[/{WARNING}] Pull timed out. Use: ollama pull {model}")
+        return False
+    except FileNotFoundError:
+        console.print(f"  [{WARNING}]{ICON_WARN}[/{WARNING}] ollama not found. Use: ollama pull {model}")
+        return False
 
 
 def _pull_model(console: Console) -> str | None:

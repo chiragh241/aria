@@ -10,11 +10,13 @@ import {
   LogOut,
   Bot,
   Activity,
+  LayoutDashboard,
 } from 'lucide-react';
 import { systemApi } from '../services/api';
 
 const navItems = [
   { path: '/chat', icon: MessageSquare, label: 'Chat' },
+  { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { path: '/approvals', icon: Shield, label: 'Approvals' },
   { path: '/skills', icon: Puzzle, label: 'Skills' },
   { path: '/settings', icon: Settings, label: 'Settings' },
@@ -76,7 +78,7 @@ export default function Layout() {
           </p>
           {navItems.map((item) => {
             const isActive = location.pathname === item.path ||
-              (item.path === '/chat' && location.pathname === '/');
+              (item.path === '/chat' && (location.pathname === '/' || location.pathname === '/chat'));
             return (
               <NavLink
                 key={item.path}

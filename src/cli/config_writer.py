@@ -110,6 +110,14 @@ class ConfigWriter:
                 "embedding_model": "all-MiniLM-L6-v2",
             },
             "episodic": {"max_episodes": 1000, "summary_threshold": 10},
+            "knowledge_graph": {
+                "enabled": True,
+                "provider": "cognee",
+                "auto_process_after_ingest": False,
+            },
+            "user_profiles_enabled": True,
+            "entity_extraction_enabled": True,
+            "auto_summarize": True,
         }
 
         # database

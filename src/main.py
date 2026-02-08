@@ -153,6 +153,20 @@ class AriaApplication:
 
         self.context_manager = ContextManager()
 
+        # Phase 1: User profile, entity extraction, summarizer
+        from src.memory.user_profile import UserProfileManager
+        from src.processing.entity_extractor import EntityExtractor
+        from src.processing.summarizer import ConversationSummarizer
+        from src.processing.sentiment import SentimentAnalyzer
+        from src.processing.personality import PersonalityAdapter
+
+        self.user_profile_manager = UserProfileManager()
+        self.entity_extractor = EntityExtractor()
+        self.conversation_summarizer = ConversationSummarizer(llm_router=self.llm_router)
+        self.conversation_summarizer.set_llm_router(self.llm_router)
+        self.sentiment_analyzer = SentimentAnalyzer()
+        self.personality_adapter = PersonalityAdapter()
+
         self.message_router = MessageRouter()
         await self.message_router.initialize()
 
@@ -213,6 +227,56 @@ class AriaApplication:
         if self.vector_memory and self.vector_memory.available:
             self.orchestrator.set_vector_memory(self.vector_memory)
 
+        # Wire context manager summarizer and vector memory for auto-summarize on trim
+        self.context_manager.set_summarizer(self.conversation_summarizer)
+        self.context_manager.set_vector_memory(self.vector_memory)
+
+        # Wire Phase 1 & 5 components to orchestrator
+        self.orchestrator.set_user_profile_manager(self.user_profile_manager)
+        self.orchestrator.set_entity_extractor(self.entity_extractor)
+        self.orchestrator.set_summarizer(self.conversation_summarizer)
+        self.orchestrator.set_sentiment_analyzer(self.sentiment_analyzer)
+        self.orchestrator.set_personality_adapter(self.personality_adapter)
+
+        # Wire memory skill with profile manager and vector memory
+        memory_skill = self.skill_registry.get_skill("memory")
+        if memory_skill:
+            memory_skill.set_profile_manager(self.user_profile_manager)
+            memory_skill.set_vector_memory(self.vector_memory)
+
+        # Phase 4: Proactive engine
+        from src.core.proactive import ProactiveEngine
+        self.proactive_engine = ProactiveEngine(
+            event_bus=self.event_bus,
+            orchestrator=self.orchestrator,
+            skill_registry=self.skill_registry,
+            scheduler=self.scheduler,
+        )
+        await self.proactive_engine.start()
+
+        # Add default morning briefing job if enabled and not exists
+        if self.settings.proactive.morning_briefing:
+            jobs = self.scheduler.list_jobs()
+            if not any(j.get("payload", {}).get("type") == "morning_briefing" for j in jobs):
+                self.scheduler.add_job(
+                    name="Morning Briefing",
+                    schedule_type="cron",
+                    schedule_value="0 8 * * *",
+                    action="agent_turn",
+                    payload={"type": "morning_briefing"},
+                )
+
+        # Phase 6: Agent coordinator
+        from src.core.agent_coordinator import AgentCoordinator
+        self.agent_coordinator = AgentCoordinator(
+            skill_registry=self.skill_registry,
+            llm_router=self.llm_router,
+            event_bus=self.event_bus,
+        )
+        agent_skill = self.skill_registry.get_skill("agent")
+        if agent_skill:
+            agent_skill.set_coordinator(self.agent_coordinator)
+
         # Initialize channels
         logger.info("Initializing channels...")
         await self._initialize_channels()
@@ -235,6 +299,8 @@ class AriaApplication:
         self.app.state.vector_memory = self.vector_memory
         self.app.state.plugin_loader = self.plugin_loader
         self.app.state.device_manager = self.device_manager
+        self.app.state.proactive_engine = self.proactive_engine
+        self.app.state.agent_coordinator = self.agent_coordinator
 
         logger.info("Aria initialization complete")
 

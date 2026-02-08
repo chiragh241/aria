@@ -176,9 +176,21 @@ def create_app(
     # -- Chat --
 
     @api.post("/chat/message")
-    async def send_message(request: MessageRequest, user_id: str = Depends(get_current_user)):
+    async def send_message(
+        request: MessageRequest,
+        http_request: Request,
+        user_id: str = Depends(get_current_user),
+    ):
         if not app.state.orchestrator:
             raise HTTPException(status_code=503, detail="Orchestrator not available")
+        # Set client IP for IP-based location (e.g. weather without explicit location)
+        client_ip = (
+            http_request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or http_request.headers.get("x-real-ip", "")
+            or (http_request.client.host if http_request.client else "")
+        )
+        from ..utils.request_context import set_client_ip
+        set_client_ip(client_ip)
         response_content = await app.state.orchestrator.chat(
             channel="web", user_id=user_id, content=request.content
         )
@@ -373,8 +385,9 @@ def create_app(
                 "port": cfg.get("channels", {}).get("web", {}).get("port", 8080),
             },
             "memory": {
-                "knowledge_graph_enabled": cfg.get("memory", {}).get("knowledge_graph", {}).get("enabled", False),
+                "knowledge_graph_enabled": cfg.get("memory", {}).get("knowledge_graph", {}).get("enabled", True),
                 "knowledge_graph_provider": cfg.get("memory", {}).get("knowledge_graph", {}).get("provider", "cognee"),
+                "knowledge_graph_auto_process_after_ingest": cfg.get("memory", {}).get("knowledge_graph", {}).get("auto_process_after_ingest", False),
             },
         }
 
@@ -676,9 +689,113 @@ def create_app(
             cfg["memory"]["knowledge_graph"]["enabled"] = d["knowledge_graph_enabled"]
         if "knowledge_graph_provider" in d:
             cfg["memory"]["knowledge_graph"]["provider"] = d["knowledge_graph_provider"]
+        if "knowledge_graph_auto_process_after_ingest" in d:
+            cfg["memory"]["knowledge_graph"]["auto_process_after_ingest"] = d["knowledge_graph_auto_process_after_ingest"]
 
         _save_yaml_config(cfg)
         return {"updated": True, "restart_required": True}
+
+    # -- HUD / Dashboard --
+
+    @api.get("/hud/vitals")
+    async def get_hud_vitals(user_id: str = Depends(get_current_user)):
+        """System vitals for HUD dashboard."""
+        vitals: dict[str, Any] = {"timestamp": datetime.now(timezone.utc).isoformat()}
+        try:
+            import psutil
+            vitals["cpu_percent"] = psutil.cpu_percent(interval=0.1)
+            vitals["memory_percent"] = psutil.virtual_memory().percent
+            vitals["memory_used_gb"] = round(psutil.virtual_memory().used / (1024**3), 2)
+            vitals["memory_total_gb"] = round(psutil.virtual_memory().total / (1024**3), 2)
+            vitals["disk_percent"] = psutil.disk_usage("/").percent
+        except ImportError:
+            vitals["cpu_percent"] = 0
+            vitals["memory_percent"] = 0
+            vitals["error"] = "psutil not installed"
+        if app.state.orchestrator:
+            vitals["llm"] = {
+                "local": app.state.orchestrator.llm_router._local_available,
+                "cloud": app.state.orchestrator.llm_router._cloud_available,
+            }
+        if hasattr(app.state, "orchestrator") and app.state.orchestrator and hasattr(app.state.orchestrator, "_channels"):
+            vitals["channels"] = {n: c.is_connected for n, c in app.state.orchestrator._channels.items()}
+        return vitals
+
+    @api.get("/hud/timeline")
+    async def get_hud_timeline(user_id: str = Depends(get_current_user)):
+        """Today's conversations for timeline view."""
+        if not app.state.orchestrator:
+            return {"events": []}
+        ctxs = await app.state.orchestrator.context_manager.get_active_contexts()
+        today = datetime.now(timezone.utc).date()
+        events = []
+        for ctx in ctxs:
+            if ctx.updated_at and ctx.updated_at.date() == today:
+                events.append({
+                    "channel": ctx.channel,
+                    "user_id": ctx.user_id,
+                    "updated_at": ctx.updated_at.isoformat(),
+                    "message_count": len([m for m in ctx.messages if m.role != "system"]),
+                })
+        return {"events": events[:50]}
+
+    @api.get("/hud/agents")
+    async def get_hud_agents(user_id: str = Depends(get_current_user)):
+        """Active agent tasks."""
+        if not hasattr(app.state, "agent_coordinator") or not app.state.agent_coordinator:
+            return {"agents": []}
+        return {"agents": app.state.agent_coordinator.list_running_agents()}
+
+    @api.get("/hud/agents/full")
+    async def get_all_agents_full(user_id: str = Depends(get_current_user)):
+        """All agent tasks with bot status for real-time dashboard."""
+        if not hasattr(app.state, "agent_coordinator") or not app.state.agent_coordinator:
+            return {"agents": []}
+        return {"agents": app.state.agent_coordinator.list_all_agents(include_completed=True)}
+
+    # -- Agents --
+
+    @api.get("/agents")
+    async def list_agents(user_id: str = Depends(get_current_user)):
+        """List running/completed agent tasks."""
+        if not hasattr(app.state, "agent_coordinator") or not app.state.agent_coordinator:
+            return {"tasks": []}
+        return {"tasks": app.state.agent_coordinator.list_running_agents()}
+
+    @api.post("/agents/run")
+    async def run_agent(
+        request: dict = Body(...),
+        user_id: str = Depends(get_current_user),
+    ):
+        """Start an agent task."""
+        if not hasattr(app.state, "agent_coordinator") or not app.state.agent_coordinator:
+            raise HTTPException(status_code=503, detail="Agent coordinator not available")
+        task = request.get("task", "")
+        agent_type = request.get("agent_type")
+        if not task:
+            raise HTTPException(status_code=400, detail="task required")
+        # Multi-destination tasks (itinerary, etc.): decompose and run parallel bots
+        if agent_type in ("itinerary", "automate") and hasattr(app.state.agent_coordinator, "delegate_parallel_subtasks"):
+            result = await app.state.agent_coordinator.delegate_parallel_subtasks(
+                task=task,
+                user_id=user_id,
+                channel="web",
+            )
+        # Research: multi-bot (Reddit + Web + X in parallel)
+        elif agent_type == "research" and hasattr(app.state.agent_coordinator, "delegate_multi_bot"):
+            result = await app.state.agent_coordinator.delegate_multi_bot(
+                task=task,
+                user_id=user_id,
+                channel="web",
+            )
+        else:
+            result = await app.state.agent_coordinator.delegate(
+                task=task,
+                agent_type=agent_type,
+                user_id=user_id,
+                channel="web",
+            )
+        return {"success": result.success, "output": result.output, "task_id": result.task_id, "error": result.error}
 
     @api.get("/system/health")
     async def health_check():
@@ -1049,6 +1166,9 @@ def create_app(
         ],
         "browser": [
             {"key": "BRAVE_API_KEY", "label": "Brave Search API Key (optional)", "secret": True},
+        ],
+        "weather": [
+            {"key": "WEATHERAPI_KEY", "label": "WeatherAPI.com API Key", "secret": True},
         ],
     }
 

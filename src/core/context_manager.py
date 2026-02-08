@@ -204,6 +204,8 @@ class ContextManager:
         self.settings = get_settings()
         self._contexts: dict[str, ConversationContext] = {}
         self._lock = asyncio.Lock()
+        self._summarizer: Any = None
+        self._vector_memory: Any = None
 
         # Persistence directory
         self._persist_dir = Path(self.settings.aria.data_dir).expanduser() / "conversations"
@@ -214,6 +216,14 @@ class ContextManager:
 
         # System prompt template
         self._system_prompt = self._build_system_prompt()
+
+    def set_summarizer(self, summarizer: Any) -> None:
+        """Set the conversation summarizer for auto-summarize on trim."""
+        self._summarizer = summarizer
+
+    def set_vector_memory(self, vm: Any) -> None:
+        """Set vector memory for storing summaries."""
+        self._vector_memory = vm
 
     def _get_persist_path(self, key: str) -> Path:
         """Get the file path for a context key."""
@@ -465,6 +475,7 @@ class ContextManager:
         Trim a context to stay within token limits.
 
         Keeps the system message and the most recent messages.
+        Optionally summarizes discarded messages and stores in vector memory.
         """
         max_messages = self.settings.memory.short_term.max_messages
 
@@ -476,6 +487,32 @@ class ContextManager:
         # Keep system message(s) and trim the rest
         system_messages = [m for m in context.messages if m.role == "system"]
         other_messages = [m for m in context.messages if m.role != "system"]
+
+        # Auto-summarize discarded messages before trimming (if enabled)
+        keep_count = max_messages - len(system_messages)
+        if (
+            self.settings.memory.auto_summarize
+            and self._summarizer
+            and len(other_messages) > keep_count
+            and keep_count > 0
+        ):
+            discarded = other_messages[:-keep_count]
+            if discarded:
+                try:
+                    summary = await self._summarizer.summarize(discarded, max_tokens=200)
+                    if summary and self._vector_memory and self._vector_memory.available:
+                        await self._vector_memory.add_document(
+                            content=summary,
+                            source=f"conv:{context.channel}:{context.user_id}",
+                            doc_type="conversation_summary",
+                            metadata={
+                                "channel": context.channel,
+                                "user_id": context.user_id,
+                                "context_id": context.id,
+                            },
+                        )
+                except Exception as e:
+                    logger.debug("Auto-summarize on trim failed", error=str(e))
 
         # Keep the most recent messages
         keep_count = max_messages - len(system_messages)

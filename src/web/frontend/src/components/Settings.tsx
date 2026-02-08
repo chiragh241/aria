@@ -71,6 +71,7 @@ interface FullConfig {
   memory?: {
     knowledge_graph_enabled: boolean;
     knowledge_graph_provider: string;
+    knowledge_graph_auto_process_after_ingest?: boolean;
   };
 }
 
@@ -113,6 +114,15 @@ const SKILL_META: Record<string, { label: string; group: string; setup?: string 
   calendar: { label: 'Calendar (Google)', group: 'Communication', setup: 'Requires Google Calendar API credentials. Set GOOGLE_CREDENTIALS_FILE in .env and complete OAuth flow.' },
   email: { label: 'Email (SMTP/IMAP)', group: 'Communication', setup: 'Requires SMTP/IMAP credentials. Set EMAIL_HOST, EMAIL_USER, EMAIL_PASSWORD in .env file.' },
   sms: { label: 'SMS (Twilio)', group: 'Communication', setup: 'Requires Twilio account. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER in .env file.' },
+  memory: { label: 'Memory & Recall', group: 'JARVIS', setup: 'Remember facts, recall memories. No setup needed.' },
+  weather: { label: 'Weather', group: 'JARVIS', setup: 'Set WEATHERAPI_KEY for WeatherAPI.com. Uses your IP for location when not specified.' },
+  news: { label: 'News', group: 'JARVIS', setup: 'Set NEWS_API_KEY for headlines. RSS fallback available.' },
+  finance: { label: 'Finance', group: 'JARVIS', setup: 'Stock/crypto prices via yfinance. No API key needed.' },
+  contacts: { label: 'Contacts', group: 'JARVIS', setup: 'Store and search contacts. No setup needed.' },
+  tracking: { label: 'Package Tracking', group: 'JARVIS', setup: 'Track packages. Add tracking numbers to the list.' },
+  home: { label: 'Smart Home (HA)', group: 'JARVIS', setup: 'Set HA_URL and HA_TOKEN for Home Assistant.' },
+  webhook: { label: 'Webhooks', group: 'JARVIS', setup: 'Send HTTP requests to URLs.' },
+  agent: { label: 'Autonomous Agents', group: 'JARVIS', setup: 'Research, coding, and data analysis agents.' },
 };
 
 // ── Main Component ───────────────────────────────────────────────────────────
@@ -1558,10 +1568,12 @@ function MemoryTab({ config }: { config: FullConfig }) {
   const [processing, setProcessing] = useState(false);
   const [processResult, setProcessResult] = useState<string | null>(null);
   const [kgEnabled, setKgEnabled] = useState(config.memory?.knowledge_graph_enabled ?? false);
+  const [kgAutoProcess, setKgAutoProcess] = useState(config.memory?.knowledge_graph_auto_process_after_ingest ?? false);
   const [needsRestart, setNeedsRestart] = useState(false);
 
   useEffect(() => {
     setKgEnabled(config.memory?.knowledge_graph_enabled ?? false);
+    setKgAutoProcess(config.memory?.knowledge_graph_auto_process_after_ingest ?? false);
   }, [config]);
 
   const handleProcessGraph = async () => {
@@ -1583,7 +1595,10 @@ function MemoryTab({ config }: { config: FullConfig }) {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      await configApi.updateMemory({ knowledge_graph_enabled: kgEnabled });
+      await configApi.updateMemory({
+        knowledge_graph_enabled: kgEnabled,
+        knowledge_graph_auto_process_after_ingest: kgAutoProcess,
+      });
     },
     onSuccess: () => {
       setNeedsRestart(true);
@@ -1642,6 +1657,21 @@ function MemoryTab({ config }: { config: FullConfig }) {
 
           {kgEnabled && (
             <>
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <p className="text-sm text-slate-300">Auto-process after ingestion</p>
+                  <p className="text-xs text-slate-500">Process knowledge graph automatically when documents are ingested</p>
+                </div>
+                <label className="cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={kgAutoProcess}
+                    onChange={(e) => setKgAutoProcess(e.target.checked)}
+                    className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+                  />
+                </label>
+              </div>
+
               <div className="bg-slate-900/40 border border-white/[0.04] rounded-lg p-4 text-xs text-slate-500 space-y-1">
                 <p>The knowledge graph processes ingested data to extract:</p>
                 <ul className="list-disc list-inside ml-2 space-y-0.5">

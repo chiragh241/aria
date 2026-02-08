@@ -270,7 +270,7 @@ export default function Chat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyPress}
-            placeholder={isRecording ? 'Listening...' : isTranscribing ? 'Transcribing...' : 'Type a message...'}
+            placeholder={isRecording ? 'Listening...' : isTranscribing ? 'Transcribing...' : 'Type a message or /help for commands...'}
             rows={1}
             className="flex-1 px-4 py-3 glass-input rounded-xl resize-none text-[14px]"
             style={{ maxHeight: '150px' }}

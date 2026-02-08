@@ -1,12 +1,63 @@
 """Knowledge graph memory using cognee for structured knowledge extraction."""
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..utils.config import get_settings
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+if TYPE_CHECKING:
+    from .user_profile import UserProfile
+
+
+def _configure_cognee_llm_from_aria() -> str:
+    """
+    Configure Cognee's LLM and embeddings from Aria's settings.
+    Uses cloud (Anthropic/Claude) if enabled and key set, else Ollama.
+    Returns provider name for logging.
+    """
+    settings = get_settings()
+    llm_local = settings.llm.local
+    llm_cloud = settings.llm.cloud
+    anthropic_key = getattr(settings, "anthropic_api_key", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+
+    # Prefer cloud (Claude) if enabled and API key is set
+    if llm_cloud.enabled and anthropic_key:
+        os.environ["LLM_PROVIDER"] = "anthropic"
+        os.environ["LLM_MODEL"] = llm_cloud.model
+        os.environ["LLM_API_KEY"] = anthropic_key
+        os.environ["LLM_MAX_TOKENS"] = str(llm_cloud.max_tokens)
+
+        # Embeddings: Anthropic doesn't have embeddings; use fastembed (local, no key)
+        # to avoid defaulting to OpenAI and requiring OPENAI_API_KEY
+        os.environ["EMBEDDING_PROVIDER"] = "fastembed"
+        os.environ["EMBEDDING_MODEL"] = "sentence-transformers/all-MiniLM-L6-v2"
+        os.environ["EMBEDDING_DIMENSIONS"] = "384"
+
+        return "anthropic"
+    else:
+        # Use Ollama (local) - matches Aria's local LLM config
+        base_url = llm_local.base_url.rstrip("/")
+        # Cognee expects /v1 suffix for Ollama
+        endpoint = f"{base_url}/v1" if "/v1" not in base_url else base_url
+        model = llm_local.model
+
+        os.environ["LLM_PROVIDER"] = "ollama"
+        os.environ["LLM_MODEL"] = model
+        os.environ["LLM_API_KEY"] = "ollama"
+        os.environ["LLM_ENDPOINT"] = endpoint
+
+        # Use Ollama for embeddings too (avoids NoDataError with mixed providers)
+        ollama_base = base_url.replace("/v1", "").rstrip("/")
+        os.environ["EMBEDDING_PROVIDER"] = "ollama"
+        os.environ["EMBEDDING_MODEL"] = "nomic-embed-text:latest"
+        os.environ["EMBEDDING_ENDPOINT"] = f"{ollama_base}/api/embed"
+        os.environ["EMBEDDING_DIMENSIONS"] = "768"
+        os.environ["HUGGINGFACE_TOKENIZER"] = "nomic-ai/nomic-embed-text-v1.5"
+
+        return "ollama"
 
 
 class CogneeGraphMemory:
@@ -17,11 +68,8 @@ class CogneeGraphMemory:
     and structured knowledge from ingested data. Provides graph-based
     search alongside vector search.
 
-    Features:
-    - Automatic entity and relationship extraction
-    - Knowledge graph construction
-    - Graph-based semantic search
-    - Insights generation from connected knowledge
+    Uses Aria's configured LLM: Anthropic (Claude) if enabled with API key,
+    otherwise Ollama (local). See docs.cognee.ai for env configuration.
     """
 
     def __init__(self, data_dir: str | None = None) -> None:
@@ -43,7 +91,6 @@ class CogneeGraphMemory:
             os.makedirs(db_path, exist_ok=True)
 
             # Point ALL cognee storage to our data directory
-            # (defaults to site-packages/.cognee_system/ which is read-only in Docker)
             cognee.config.data_root_directory(db_path)
             cognee.config.set_relational_db_config({
                 "db_path": db_path,
@@ -55,27 +102,23 @@ class CogneeGraphMemory:
                 "vector_db_provider": "lancedb",
             })
 
-            # Use Ollama for cognee's internal LLM calls (local, private, no cost)
-            ollama_endpoint = os.environ.get("LLM_ENDPOINT", "http://localhost:11434/v1")
-            ollama_model = os.environ.get("LLM_MODEL", "llama3.1:8b")
-
-            # Set env vars cognee expects
-            os.environ["LLM_API_KEY"] = "ollama"
+            # Use Aria's LLM config (Ollama or Claude)
+            provider = _configure_cognee_llm_from_aria()
 
             cognee.config.set_llm_config({
-                "llm_api_key": "ollama",
-                "llm_provider": "ollama",
-                "llm_model": ollama_model,
-                "llm_endpoint": ollama_endpoint,
+                "llm_provider": os.environ.get("LLM_PROVIDER", "ollama"),
+                "llm_model": os.environ.get("LLM_MODEL", "llama3.1:8b"),
+                "llm_api_key": os.environ.get("LLM_API_KEY", "ollama"),
+                "llm_endpoint": os.environ.get("LLM_ENDPOINT", "http://localhost:11434/v1"),
+                "llm_max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "4096")),
             })
 
             self._available = True
             self._initialized = True
             logger.info(
-                "Cognee knowledge graph initialized with Ollama",
+                "Cognee knowledge graph initialized",
+                provider=provider,
                 data_dir=db_path,
-                model=ollama_model,
-                endpoint=ollama_endpoint,
             )
         except ImportError:
             logger.warning("cognee not installed, knowledge graph disabled")
@@ -113,6 +156,60 @@ class CogneeGraphMemory:
         except Exception as e:
             logger.error("Failed to add to cognee", error=str(e))
             return False
+
+    async def add_user_profile_knowledge(
+        self,
+        user_id: str,
+        profile: "UserProfile",
+    ) -> bool:
+        """
+        Sync user profile into the knowledge graph for unified search.
+        Formats preferences, facts, and relationships so Cognee can extract
+        entities and relationships alongside ingested documents.
+
+        Args:
+            user_id: User identifier
+            profile: User profile object
+
+        Returns:
+            True if content was added
+        """
+        if not self._available:
+            return False
+
+        parts = [f"User profile for {user_id}:"]
+        if profile.preferred_name or profile.name:
+            parts.append(f"Name: {profile.preferred_name or profile.name}")
+        if profile.timezone:
+            parts.append(f"Timezone: {profile.timezone}")
+        if profile.language and profile.language != "en":
+            parts.append(f"Language: {profile.language}")
+        if profile.communication_style:
+            parts.append(f"Communication style: {profile.communication_style}")
+        if profile.interests:
+            parts.append(f"Interests: {', '.join(profile.interests)}")
+        if profile.important_people:
+            for name, rel in profile.important_people.items():
+                parts.append(f"Important person: {name} (relationship: {rel})")
+        if profile.important_dates:
+            for label, date in profile.important_dates.items():
+                parts.append(f"Important date: {label} = {date}")
+        if profile.preferences:
+            for k, v in profile.preferences.items():
+                parts.append(f"Preference: {k} = {v}")
+        if profile.facts:
+            parts.append("Facts about the user:")
+            for fact in profile.facts[-20:]:
+                parts.append(f"  - {fact}")
+
+        if len(parts) <= 1:
+            return False
+
+        content = "\n".join(parts)
+        return await self.add_knowledge(
+            content=content,
+            dataset_name="aria_user_profiles",
+        )
 
     async def process_knowledge(self, dataset_name: str = "aria_knowledge") -> bool:
         """

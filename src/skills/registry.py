@@ -122,6 +122,97 @@ class SkillRegistry:
                 {"name": "summarize", "description": "Summarize document contents"},
             ],
         },
+        "memory": {
+            "description": "Remember facts, recall memories, and manage what the assistant knows about you",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "remember", "description": "Store a fact about the user"},
+                {"name": "recall", "description": "Search memory for facts"},
+                {"name": "forget", "description": "Remove a stored fact"},
+                {"name": "list_memories", "description": "List all stored facts"},
+            ],
+        },
+        "weather": {
+            "description": "Get current weather, forecasts, and weather alerts",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "current", "description": "Get current weather for a location"},
+                {"name": "forecast", "description": "Get 5-day forecast"},
+                {"name": "alerts", "description": "Get severe weather alerts"},
+            ],
+        },
+        "news": {
+            "description": "Get top news headlines, search news, and summarize articles",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "headlines", "description": "Get top headlines"},
+                {"name": "search", "description": "Search news by keyword"},
+                {"name": "summarize", "description": "Summarize an article URL"},
+            ],
+        },
+        "finance": {
+            "description": "Check stock prices, crypto prices, and market overview",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "stock_price", "description": "Get stock price"},
+                {"name": "crypto_price", "description": "Get crypto price"},
+                {"name": "market_summary", "description": "Get market overview"},
+            ],
+        },
+        "contacts": {
+            "description": "Store and search contacts (name, phone, email)",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "add_contact", "description": "Add a contact"},
+                {"name": "find_contact", "description": "Search contacts"},
+                {"name": "list_contacts", "description": "List all contacts"},
+            ],
+        },
+        "tracking": {
+            "description": "Track packages by tracking number",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "track", "description": "Track package by number"},
+                {"name": "list_packages", "description": "List tracked packages"},
+            ],
+        },
+        "home": {
+            "description": "Control smart home devices via Home Assistant",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "list_devices", "description": "List HA entities"},
+                {"name": "turn_on", "description": "Turn on entity"},
+                {"name": "turn_off", "description": "Turn off entity"},
+                {"name": "set_climate", "description": "Set thermostat"},
+            ],
+        },
+        "webhook": {
+            "description": "Send HTTP requests to webhooks",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "fire", "description": "Send HTTP request"},
+                {"name": "list_webhooks", "description": "List saved webhooks"},
+            ],
+        },
+        "agent": {
+            "description": "Autonomous research, coding, and data analysis agents",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "research", "description": "Research a topic"},
+                {"name": "code", "description": "Write and run code"},
+                {"name": "analyze", "description": "Analyze data"},
+            ],
+        },
+        "research": {
+            "description": "Search Reddit, X (Twitter), and the web for any topic",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "search_topic", "description": "Research across Reddit, web, and X"},
+                {"name": "search_reddit", "description": "Search Reddit"},
+                {"name": "search_web", "description": "Search the web"},
+                {"name": "search_x", "description": "Search X (Twitter)"},
+            ],
+        },
     }
 
     def __init__(
@@ -168,6 +259,16 @@ class SkillRegistry:
             ("image", "ImageSkill", builtin_config.image),
             ("video", "VideoSkill", builtin_config.video),
             ("documents", "DocumentsSkill", builtin_config.documents),
+            ("memory", "MemorySkill", builtin_config.memory),
+            ("weather", "WeatherSkill", builtin_config.weather),
+            ("news", "NewsSkill", builtin_config.news),
+            ("finance", "FinanceSkill", builtin_config.finance),
+            ("contacts", "ContactsSkill", builtin_config.contacts),
+            ("tracking", "TrackingSkill", builtin_config.tracking),
+            ("home", "HomeSkill", builtin_config.home),
+            ("webhook", "WebhookSkill", builtin_config.webhook),
+            ("agent", "AgentSkill", builtin_config.agent),
+            ("research", "ResearchSkill", builtin_config.research),
         ]
 
         for skill_name, class_name, config in skill_classes:
@@ -404,6 +505,16 @@ class SkillRegistry:
             "image": "ImageSkill",
             "video": "VideoSkill",
             "documents": "DocumentsSkill",
+            "memory": "MemorySkill",
+            "weather": "WeatherSkill",
+            "news": "NewsSkill",
+            "finance": "FinanceSkill",
+            "contacts": "ContactsSkill",
+            "tracking": "TrackingSkill",
+            "home": "HomeSkill",
+            "webhook": "WebhookSkill",
+            "agent": "AgentSkill",
+            "research": "ResearchSkill",
         }
         class_name = class_map.get(skill_name)
         if not class_name:

@@ -3,6 +3,7 @@ import { useAuthStore } from './hooks/useAuth';
 import Layout from './components/Layout';
 import Login from './components/Login';
 import Chat from './components/Chat';
+import Dashboard from './pages/Dashboard';
 import Approvals from './components/Approvals';
 import Skills from './components/Skills';
 import Settings from './components/Settings';
@@ -27,6 +28,7 @@ export default function App() {
       >
         <Route index element={<Chat />} />
         <Route path="chat" element={<Chat />} />
+        <Route path="dashboard" element={<Dashboard />} />
         <Route path="approvals" element={<Approvals />} />
         <Route path="skills" element={<Skills />} />
         <Route path="settings" element={<Settings />} />

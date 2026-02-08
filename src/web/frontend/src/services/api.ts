@@ -93,6 +93,28 @@ export const systemApi = {
     api.post('/system/reset'),
 };
 
+export const hudApi = {
+  getVitals: () =>
+    api.get('/hud/vitals'),
+
+  getTimeline: () =>
+    api.get('/hud/timeline'),
+
+  getAgents: () =>
+    api.get('/hud/agents'),
+
+  getAllAgentsFull: () =>
+    api.get('/hud/agents/full'),
+};
+
+export const agentsApi = {
+  list: () =>
+    api.get('/agents'),
+
+  run: (task: string, agentType?: string) =>
+    api.post('/agents/run', { task, agent_type: agentType }),
+};
+
 export const knowledgeApi = {
   processGraph: () =>
     api.post('/knowledge/process'),
