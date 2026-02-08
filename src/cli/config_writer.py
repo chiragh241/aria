@@ -287,6 +287,20 @@ class ConfigWriter:
                 "ffmpeg_path": "ffmpeg",
             },
             "documents": {"enabled": "documents" in s.enabled_skills},
+            "memory": {"enabled": "memory" in s.enabled_skills},
+            "weather": {"enabled": "weather" in s.enabled_skills},
+            "news": {"enabled": "news" in s.enabled_skills},
+            "finance": {"enabled": "finance" in s.enabled_skills},
+            "contacts": {"enabled": "contacts" in s.enabled_skills},
+            "tracking": {"enabled": "tracking" in s.enabled_skills},
+            "home": {"enabled": "home" in s.enabled_skills},
+            "webhook": {"enabled": "webhook" in s.enabled_skills},
+            "agent": {"enabled": "agent" in s.enabled_skills},
+            "research": {"enabled": "research" in s.enabled_skills},
+            "notion": {"enabled": "notion" in s.enabled_skills, "api_key": ""},
+            "todoist": {"enabled": "todoist" in s.enabled_skills, "api_key": ""},
+            "linear": {"enabled": "linear" in s.enabled_skills, "api_key": ""},
+            "spotify": {"enabled": "spotify" in s.enabled_skills, "client_id": "", "client_secret": ""},
         }
 
         return {
@@ -349,6 +363,25 @@ class ConfigWriter:
         if s.brave_api_key:
             lines.append("# Brave Search API")
             lines.append(f"BRAVE_API_KEY={s.brave_api_key}")
+            lines.append("")
+
+        # Integrations
+        if s.notion_api_key:
+            lines.append("# Notion")
+            lines.append(f"NOTION_API_KEY={s.notion_api_key}")
+            lines.append("")
+        if s.todoist_api_key:
+            lines.append("# Todoist")
+            lines.append(f"TODOIST_API_KEY={s.todoist_api_key}")
+            lines.append("")
+        if s.linear_api_key:
+            lines.append("# Linear")
+            lines.append(f"LINEAR_API_KEY={s.linear_api_key}")
+            lines.append("")
+        if s.spotify_client_id and s.spotify_client_secret:
+            lines.append("# Spotify")
+            lines.append(f"SPOTIFY_CLIENT_ID={s.spotify_client_id}")
+            lines.append(f"SPOTIFY_CLIENT_SECRET={s.spotify_client_secret}")
             lines.append("")
 
         # Data

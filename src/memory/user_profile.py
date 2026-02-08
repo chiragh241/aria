@@ -140,6 +140,18 @@ class UserProfileManager:
             return True
         return False
 
+    def remove_fact_by_query(self, user_id: str, query: str) -> tuple[bool, int]:
+        """Remove facts matching query (substring match). Returns (success, count_removed)."""
+        profile = self.get_profile(user_id)
+        q = query.lower()
+        to_remove = [i for i, f in enumerate(profile.facts) if q in f.lower()]
+        for i in reversed(to_remove):
+            profile.facts.pop(i)
+        if to_remove:
+            profile.updated_at = datetime.now(timezone.utc).isoformat()
+            self._persist(profile)
+        return True, len(to_remove)
+
     def get_context_for_llm(self, user_id: str) -> str:
         """Format profile as context string for the LLM system prompt."""
         profile = self.get_profile(user_id)

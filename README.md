@@ -11,9 +11,11 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
 - **Sandboxed Execution**: Docker isolation for untrusted code
 - **Memory**: Short-term conversation, long-term vector store (ChromaDB), episodic task history, user profiles
 - **Knowledge Graph**: Cognee integration for entity/relationship extraction—synced with user profiles
-- **20+ Built-in Skills**: File ops, shell, browser, calendar, email, SMS, TTS, STT, image, video, documents, weather, research, agent, memory, finance, news, contacts, tracking, webhook, home
+- **29 Features**: Morning briefing, context reminders, proactive suggestions, time-of-day awareness, cost/usage tracking, theme toggle, data export, PWA, push notifications, keyboard shortcuts, debug trace, skill templates, and more
+- **Integrations**: Notion, Todoist, Linear, Spotify (API keys configurable in Settings or onboarding)
+- **Built-in Skills**: File ops, shell, browser, calendar, email, SMS, TTS, STT, image, video, documents, weather, research, agent, memory, finance, news, contacts, tracking, webhook, home, notion, todoist, linear, spotify
 - **Dynamic Skills**: AI can generate new skills on demand
-- **Web Dashboard**: Full React UI for chat, approvals, settings, logs, skills
+- **Web Dashboard**: Chat, approvals, settings, logs, skills, setup onboarding, cost/usage widgets, data export
 - **Slash Commands**: `/help`, `/clear`, `/status`, `/skills`, `/capabilities` in web chat and all channels
 - **"What can you do"**: Ask in plain language for a detailed list of skills and how to trigger them
 
@@ -39,7 +41,7 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
    ```bash
    python -m src.main --setup
    ```
-   The wizard configures LLM providers, channels, and more. When you choose Ollama, it detects your hardware (RAM, GPU) and suggests the best model—optionally downloading it for you.
+   The wizard configures LLM providers, channels, skills, and integrations (Notion, Todoist, Linear, Spotify). When you choose Ollama, it detects your hardware (RAM, GPU) and suggests the best model—optionally downloading it for you.
 
 3. **Set up environment**:
    ```bash
@@ -89,6 +91,9 @@ Edit `config/settings.yaml` to customize:
 - Channel settings (Slack, WhatsApp, Web)
 - Security profile
 - Memory, knowledge graph (Cognee), and sandbox options
+- Skills and integrations (Notion, Todoist, Linear, Spotify)
+
+**Web UI**: After login, use **Setup** (onboarding) or **Settings** to select skills, add integration API keys, and configure the system.
 
 ### Web Chat Commands
 
@@ -106,7 +111,7 @@ Or ask **"What can you do?"** for a full capabilities list.
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        WEB DASHBOARD (React)                        │
-│   Chat │ Approvals │ Settings │ Logs │ Skills                       │
+│   Chat │ Dashboard │ Setup │ Approvals │ Skills │ Settings │ Logs  │
 └─────────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -160,9 +165,14 @@ aria/
 | `/api/skills` | GET | List skills |
 | `/api/config` | GET | Get full config |
 | `/api/config/llm` | PUT | Update LLM config |
+| `/api/config/integrations` | PUT | Update integrations (Notion, Todoist, Linear, Spotify) |
 | `/api/config/memory` | PUT | Update memory config |
+| `/api/features` | GET | List all features |
+| `/api/usage` | GET | LLM usage and cost stats |
+| `/api/export` | GET | Export data (conversations, audit, full) |
 | `/api/knowledge/process` | POST | Process knowledge graph |
 | `/api/audit` | GET | Get audit log |
+| `/api/docs` | GET | OpenAPI documentation |
 
 ## License
 

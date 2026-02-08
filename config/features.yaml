@@ -1,0 +1,54 @@
+# Aria Feature Flags - All 33 capabilities
+# Enable/disable features without code changes
+
+features:
+  # Proactive & Contextual
+  morning_briefing: true
+  context_aware_reminders: true
+  proactive_suggestions: true
+  time_of_day_awareness: true
+
+  # Integrations
+  notion_integration: false  # requires NOTION_API_KEY
+  obsidian_integration: false
+  todoist_integration: false  # requires TODOIST_API_KEY
+  linear_integration: false   # requires LINEAR_API_KEY
+  spotify_integration: false  # requires SPOTIFY_CLIENT_ID
+  system_tray: false          # native app - platform-specific
+  browser_extension: false    # separate package
+
+  # Learning & Memory
+  remember_forget_commands: true
+  conversation_summarization: true
+  learning_from_corrections: true
+  cross_session_context: true
+
+  # Dashboard & Observability
+  cost_usage_dashboard: true
+  latency_metrics: true
+  custom_widgets: true
+  theme_toggle: true
+  data_export: true
+
+  # Workflows & Automation
+  recurring_tasks: true
+  custom_workflows: false     # advanced - chain skills
+  webhooks: true
+  scheduled_reports: true
+
+  # Mobile & Access
+  pwa: true
+  push_notifications: false  # requires VAPID keys
+  keyboard_shortcuts: true
+  voice_first_mode: true
+
+  # Collaboration
+  shared_workspaces: false   # multi-tenant
+  delegation: false
+  permission_levels: true
+
+  # Developer Experience
+  plugin_marketplace: false
+  public_api_docs: true
+  skill_templates: true
+  debug_trace_mode: true

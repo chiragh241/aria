@@ -10,6 +10,7 @@ import tiktoken
 
 from ..utils.config import get_settings
 from ..utils.logging import get_logger
+from .usage_tracker import get_usage_tracker
 
 logger = get_logger(__name__)
 
@@ -680,12 +681,24 @@ class LLMRouter:
         )
 
         try:
+            import time
+            t0 = time.perf_counter()
             response = await client.generate(
                 messages=messages,
                 tools=tools,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 **kwargs,
+            )
+            latency_ms = (time.perf_counter() - t0) * 1000
+            usage = response.usage or {}
+            get_usage_tracker().record(
+                provider=provider.value,
+                model=response.model,
+                input_tokens=usage.get("prompt_tokens", usage.get("input_tokens", 0)),
+                output_tokens=usage.get("completion_tokens", usage.get("output_tokens", 0)),
+                latency_ms=latency_ms,
+                task_type=task_type or "",
             )
             return response
         except Exception as e:

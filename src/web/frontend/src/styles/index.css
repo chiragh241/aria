@@ -13,6 +13,18 @@
   --accent-gradient: linear-gradient(135deg, #3b82f6, #8b5cf6);
 }
 
+html.light {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #f1f5f9;
+  --bg-card: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+}
+
+html.light body {
+  @apply bg-slate-50 text-slate-900;
+}
+
 body {
   @apply bg-[#0a1120] text-slate-100 antialiased;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
@@ -77,6 +89,16 @@ body {
   .stat-card::before {
     content: '';
     @apply absolute top-0 left-0 right-0 h-[2px];
+  }
+
+  .dashboard-card {
+    @apply rounded-2xl border border-white/[0.06] bg-slate-800/50 backdrop-blur-sm;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 4px 24px -4px rgba(0, 0, 0, 0.2);
+  }
+
+  .dashboard-card:hover {
+    @apply border-white/[0.08];
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 32px -8px rgba(0, 0, 0, 0.25);
   }
 
   .badge {

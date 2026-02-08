@@ -269,6 +269,10 @@ class SkillRegistry:
             ("webhook", "WebhookSkill", builtin_config.webhook),
             ("agent", "AgentSkill", builtin_config.agent),
             ("research", "ResearchSkill", builtin_config.research),
+            ("notion", "NotionSkill", builtin_config.notion),
+            ("todoist", "TodoistSkill", builtin_config.todoist),
+            ("linear", "LinearSkill", builtin_config.linear),
+            ("spotify", "SpotifySkill", builtin_config.spotify),
         ]
 
         for skill_name, class_name, config in skill_classes:

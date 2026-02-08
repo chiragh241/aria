@@ -66,20 +66,23 @@ class MemorySkill(BaseSkill):
         )
         self.register_capability(
             name="forget",
-            description="Remove a specific stored fact by its index number",
+            description="Remove a specific stored fact by index or by query. Use fact_index for exact index, or query to remove all facts matching a phrase.",
             parameters={
                 "type": "object",
                 "properties": {
                     "fact_index": {
                         "type": "integer",
-                        "description": "The index of the fact to remove (0-based)",
+                        "description": "The index of the fact to remove (0-based). Use -1 if using query instead.",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Remove all facts containing this phrase (e.g. 'wife' removes 'My wife is Sarah')",
                     },
                     "user_id": {
                         "type": "string",
                         "description": "The user ID",
                     },
                 },
-                "required": ["fact_index"],
             },
         )
         self.register_capability(
@@ -104,7 +107,9 @@ class MemorySkill(BaseSkill):
         elif capability == "recall":
             return await self._recall(kwargs.get("query", ""), kwargs.get("user_id", "default"), start)
         elif capability == "forget":
-            return await self._forget(kwargs.get("fact_index", -1), kwargs.get("user_id", "default"), start)
+            query = kwargs.get("query", "")
+            fact_index = kwargs.get("fact_index", -1)
+            return await self._forget(fact_index, query, kwargs.get("user_id", "default"), start)
         elif capability == "list_memories":
             return await self._list_memories(kwargs.get("user_id", "default"), start)
         else:
@@ -166,14 +171,18 @@ class MemorySkill(BaseSkill):
 
         return self._success_result("\n\n".join(results), start)
 
-    async def _forget(self, fact_index: int, user_id: str, start: datetime) -> SkillResult:
+    async def _forget(self, fact_index: int, query: str, user_id: str, start: datetime) -> SkillResult:
         if not self._profile_manager:
             return self._error_result("Profile manager not available", start)
 
-        if self._profile_manager.remove_fact(user_id, fact_index):
-            return self._success_result(f"Forgot fact at index {fact_index}", start)
-        else:
+        if query:
+            _, count = self._profile_manager.remove_fact_by_query(user_id, query)
+            return self._success_result(f"Forgot {count} fact(s) matching '{query}'", start)
+        if fact_index >= 0:
+            if self._profile_manager.remove_fact(user_id, fact_index):
+                return self._success_result(f"Forgot fact at index {fact_index}", start)
             return self._error_result(f"Invalid fact index: {fact_index}", start)
+        return self._error_result("Provide fact_index or query to forget", start)
 
     async def _list_memories(self, user_id: str, start: datetime) -> SkillResult:
         if not self._profile_manager:

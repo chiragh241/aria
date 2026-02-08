@@ -236,6 +236,10 @@ class BuiltinSkillsConfig(BaseModel):
     webhook: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
     agent: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
     research: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    notion: dict[str, Any] = Field(default_factory=lambda: {"enabled": False, "api_key": ""})
+    todoist: dict[str, Any] = Field(default_factory=lambda: {"enabled": False, "api_key": ""})
+    linear: dict[str, Any] = Field(default_factory=lambda: {"enabled": False, "api_key": ""})
+    spotify: dict[str, Any] = Field(default_factory=lambda: {"enabled": False, "client_id": "", "client_secret": ""})
 
 
 class LearnedSkillsConfig(BaseModel):
@@ -279,7 +283,9 @@ class ProactiveConfig(BaseModel):
     briefing_time: str = "08:00"
     briefing_channel: str = ""
     follow_up_tracking: bool = True
-    suggestions_enabled: bool = False
+    suggestions_enabled: bool = True
+    context_reminders: bool = True
+    time_of_day_awareness: bool = True
 
 
 class AgentsConfig(BaseModel):
@@ -315,6 +321,7 @@ class Settings(BaseSettings):
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    feature_overrides: dict[str, bool] = Field(default_factory=dict)
 
     # API keys from environment
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")

@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './hooks/useAuth';
 import Layout from './components/Layout';
 import Login from './components/Login';
+import Onboarding from './components/Onboarding';
 import Chat from './components/Chat';
 import Dashboard from './pages/Dashboard';
 import Approvals from './components/Approvals';
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="approvals" element={<Approvals />} />
         <Route path="skills" element={<Skills />} />
+        <Route path="onboarding" element={<Onboarding />} />
         <Route path="settings" element={<Settings />} />
         <Route path="logs" element={<Logs />} />
       </Route>

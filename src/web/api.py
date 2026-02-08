@@ -1,5 +1,6 @@
 """FastAPI backend for Aria web dashboard."""
 
+import json
 import os
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -19,7 +20,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
@@ -131,6 +132,7 @@ def create_app(
     app.state.users = {
         "admin": hash_password(admin_password),
     }
+    app.state.trace_log = []
 
     # JWT
     JWT_SECRET = settings.jwt_secret
@@ -191,9 +193,15 @@ def create_app(
         )
         from ..utils.request_context import set_client_ip
         set_client_ip(client_ip)
+        from ..features.registry import is_feature_enabled
+        trace_on = is_feature_enabled("debug_trace")
+        if trace_on:
+            app.state.trace_log.append({"ts": datetime.now(timezone.utc).isoformat(), "event": "chat_start", "user_id": user_id, "content_preview": request.content[:80]})
         response_content = await app.state.orchestrator.chat(
             channel="web", user_id=user_id, content=request.content
         )
+        if trace_on:
+            app.state.trace_log.append({"ts": datetime.now(timezone.utc).isoformat(), "event": "chat_done", "user_id": user_id, "response_preview": response_content[:80]})
         return {"response": response_content, "timestamp": datetime.now(timezone.utc).isoformat()}
 
     @api.get("/chat/history")
@@ -381,6 +389,12 @@ def create_app(
                 for name, skill_cfg in cfg.get("skills", {}).get("builtin", {}).items()
                 if isinstance(skill_cfg, dict)
             },
+            "integrations": {
+                "notion": {"enabled": _skill_enabled(cfg, "notion"), "api_key_set": bool(env.get("NOTION_API_KEY"))},
+                "todoist": {"enabled": _skill_enabled(cfg, "todoist"), "api_key_set": bool(env.get("TODOIST_API_KEY"))},
+                "linear": {"enabled": _skill_enabled(cfg, "linear"), "api_key_set": bool(env.get("LINEAR_API_KEY"))},
+                "spotify": {"enabled": _skill_enabled(cfg, "spotify"), "client_id_set": bool(env.get("SPOTIFY_CLIENT_ID")), "client_secret_set": bool(env.get("SPOTIFY_CLIENT_SECRET"))},
+            },
             "dashboard": {
                 "port": cfg.get("channels", {}).get("web", {}).get("port", 8080),
             },
@@ -551,6 +565,37 @@ def create_app(
         _save_yaml_config(cfg)
         return {"updated": True, "restart_required": True}
 
+    @api.put("/config/integrations")
+    async def update_integrations_config(body: ConfigUpdate, user_id: str = Depends(get_current_user)):
+        """Update integration API keys and enable/disable."""
+        cfg = _load_yaml_config()
+        d = body.data
+
+        if "skills" not in cfg:
+            cfg["skills"] = {}
+        if "builtin" not in cfg["skills"]:
+            cfg["skills"]["builtin"] = {}
+
+        for name in ("notion", "todoist", "linear"):
+            if f"{name}_enabled" in d:
+                if name not in cfg["skills"]["builtin"]:
+                    cfg["skills"]["builtin"][name] = {}
+                cfg["skills"]["builtin"][name]["enabled"] = d[f"{name}_enabled"]
+            if f"{name}_api_key" in d and d[f"{name}_api_key"]:
+                _set_env_value(f"{name.upper()}_API_KEY", d[f"{name}_api_key"])
+
+        if "spotify_enabled" in d:
+            if "spotify" not in cfg["skills"]["builtin"]:
+                cfg["skills"]["builtin"]["spotify"] = {}
+            cfg["skills"]["builtin"]["spotify"]["enabled"] = d["spotify_enabled"]
+        if d.get("spotify_client_id"):
+            _set_env_value("SPOTIFY_CLIENT_ID", d["spotify_client_id"])
+        if d.get("spotify_client_secret"):
+            _set_env_value("SPOTIFY_CLIENT_SECRET", d["spotify_client_secret"])
+
+        _save_yaml_config(cfg)
+        return {"updated": True, "restart_required": True}
+
     @api.put("/config/dashboard")
     async def update_dashboard_config(body: ConfigUpdate, user_id: str = Depends(get_current_user)):
         """Update dashboard configuration (port, password)."""
@@ -696,6 +741,168 @@ def create_app(
         return {"updated": True, "restart_required": True}
 
     # -- HUD / Dashboard --
+
+    @api.get("/features")
+    async def list_features(user_id: str = Depends(get_current_user)):
+        """List all features with status."""
+        from ..features.registry import FEATURES, is_feature_enabled
+        return {
+            "features": [
+                {
+                    "id": f.id,
+                    "name": f.name,
+                    "description": f.description,
+                    "category": f.category,
+                    "enabled": is_feature_enabled(f.id),
+                }
+                for f in FEATURES.values()
+            ]
+        }
+
+    @api.put("/features/{feature_id}")
+    async def toggle_feature(
+        feature_id: str,
+        body: dict = Body(..., embed=True),
+        user_id: str = Depends(get_current_user),
+    ):
+        """Toggle a feature on/off. Body: { "enabled": true|false }."""
+        from ..features.registry import FEATURES
+        if feature_id not in FEATURES:
+            raise HTTPException(404, f"Unknown feature: {feature_id}")
+        enabled = body.get("enabled", True)
+        cfg = _load_yaml_config()
+        if "feature_overrides" not in cfg:
+            cfg["feature_overrides"] = {}
+        cfg["feature_overrides"][feature_id] = bool(enabled)
+        _save_yaml_config(cfg)
+        from ..utils.config import reload_settings
+        reload_settings()
+        return {"feature_id": feature_id, "enabled": enabled}
+
+    @api.get("/usage")
+    async def get_usage_stats(user_id: str = Depends(get_current_user)):
+        """LLM usage and cost tracking."""
+        from ..core.usage_tracker import get_usage_tracker
+        return get_usage_tracker().get_stats()
+
+    @api.get("/export")
+    async def export_data(
+        user_id: str = Depends(get_current_user),
+        type: str = Query("all", description="all | conversations | audit"),
+    ):
+        """Export data (conversations, audit logs)."""
+        from fastapi.responses import StreamingResponse
+        import io
+        settings = get_settings()
+        data_dir = Path(settings.aria.data_dir).expanduser()
+
+        if type == "conversations":
+            # Export from context manager if available
+            if app.state.orchestrator:
+                ctxs = await app.state.orchestrator.context_manager.get_active_contexts()
+                export_data = {"conversations": [{"channel": c.channel, "user_id": c.user_id} for c in ctxs]}
+            else:
+                export_data = {"conversations": []}
+            buf = io.BytesIO(json.dumps(export_data, indent=2).encode())
+            return StreamingResponse(
+                iter([buf.getvalue()]),
+                media_type="application/json",
+                headers={"Content-Disposition": f'attachment; filename=aria-export-{type}.json'},
+            )
+        elif type == "audit":
+            audit_path = Path(settings.logging.audit_file).expanduser()
+            if audit_path.exists():
+                return FileResponse(audit_path, filename="audit.log")
+            raise HTTPException(404, "Audit log not found")
+        else:
+            # all
+            export_data = {"exported_at": datetime.now(timezone.utc).isoformat(), "type": "full"}
+            if app.state.orchestrator:
+                ctxs = await app.state.orchestrator.context_manager.get_active_contexts()
+                export_data["conversations"] = [{"channel": c.channel, "user_id": c.user_id} for c in ctxs]
+            from ..core.usage_tracker import get_usage_tracker
+            export_data["usage"] = get_usage_tracker().get_stats()
+            buf = io.BytesIO(json.dumps(export_data, indent=2).encode())
+            return StreamingResponse(
+                iter([buf.getvalue()]),
+                media_type="application/json",
+                headers={"Content-Disposition": "attachment; filename=aria-export-full.json"},
+            )
+
+    @api.post("/push/subscribe")
+    async def push_subscribe(
+        body: dict = Body(...),
+        user_id: str = Depends(get_current_user),
+    ):
+        """Register a push subscription for notifications (Web Push API)."""
+        if not hasattr(app.state, "push_subscriptions"):
+            app.state.push_subscriptions = {}
+        key = body.get("endpoint") or str(body)
+        app.state.push_subscriptions[user_id] = body
+        return {"success": True, "message": "Push subscription registered"}
+
+    @api.get("/debug/trace")
+    async def get_trace_log(user_id: str = Depends(get_current_user)):
+        """Get recent trace log when debug_trace feature is enabled."""
+        from ..features.registry import is_feature_enabled
+        if not is_feature_enabled("debug_trace"):
+            return {"traces": [], "message": "Debug trace disabled"}
+        traces = getattr(app.state, "trace_log", [])[-100:]
+        return {"traces": traces}
+
+    @api.get("/skill-templates")
+    async def list_skill_templates(user_id: str = Depends(get_current_user)):
+        """List available skill templates for quick-start."""
+        from ..features.registry import is_feature_enabled
+        if not is_feature_enabled("skill_templates"):
+            return {"templates": []}
+        settings = get_settings()
+        templates_dir = Path(settings.aria.data_dir).expanduser() / "skill_templates"
+        templates_dir.mkdir(parents=True, exist_ok=True)
+        templates = []
+        for f in templates_dir.glob("*.py"):
+            try:
+                content = f.read_text(encoding="utf-8")
+                # Extract docstring or first 200 chars as description
+                desc = content.split('"""')[1][:150] if '"""' in content else f.name
+                templates.append({"id": f.stem, "name": f.stem.replace("_", " ").title(), "description": desc, "file": f.name})
+            except Exception:
+                pass
+        # Seed default templates if empty
+        if not templates:
+            for name, content in _default_skill_templates():
+                path = templates_dir / f"{name}.py"
+                if not path.exists():
+                    path.write_text(content, encoding="utf-8")
+                desc = content.split('"""')[1].split('"""')[0].strip()[:100] if '"""' in content else name
+                templates.append({"id": name, "name": name.replace("_", " ").title(), "description": desc, "file": f"{name}.py"})
+        return {"templates": templates}
+
+    @api.get("/widgets")
+    async def list_custom_widgets(user_id: str = Depends(get_current_user)):
+        """List user-defined dashboard widgets."""
+        from ..features.registry import is_feature_enabled
+        if not is_feature_enabled("custom_widgets"):
+            return {"widgets": []}
+        cfg = _load_yaml_config()
+        widgets = cfg.get("dashboard", {}).get("custom_widgets", [])
+        return {"widgets": widgets}
+
+    @api.put("/widgets")
+    async def update_custom_widgets(
+        body: dict = Body(...),
+        user_id: str = Depends(get_current_user),
+    ):
+        """Update custom widget definitions. Body: { "widgets": [...] }."""
+        from ..features.registry import is_feature_enabled
+        if not is_feature_enabled("custom_widgets"):
+            raise HTTPException(403, "Custom widgets disabled")
+        cfg = _load_yaml_config()
+        if "dashboard" not in cfg:
+            cfg["dashboard"] = {}
+        cfg["dashboard"]["custom_widgets"] = body.get("widgets", [])
+        _save_yaml_config(cfg)
+        return {"updated": True}
 
     @api.get("/hud/vitals")
     async def get_hud_vitals(user_id: str = Depends(get_current_user)):
@@ -1631,6 +1838,48 @@ def create_app(
 
 
 # ── Config file helpers ───────────────────────────────────────────────────────
+
+
+def _default_skill_templates() -> list[tuple[str, str]]:
+    """Default skill templates for skill_templates feature."""
+    return [
+        (
+            "hello_world",
+            '"""A minimal skill that says hello."""\n'
+            "from ..base import BaseSkill, SkillResult\n\n"
+            "class HelloWorldSkill(BaseSkill):\n"
+            '    name = "hello_world"\n'
+            '    description = "Say hello"\n\n'
+            "    def _register_capabilities(self):\n"
+            '        self.register_capability("greet", "Return a greeting", {"type": "object"})\n\n'
+            "    async def execute(self, capability, **kwargs):\n"
+            '        return SkillResult(success=True, output="Hello from your custom skill!")',
+        ),
+        (
+            "url_fetcher",
+            '"""Fetch and summarize a URL."""\n'
+            "import httpx\n"
+            "from ..base import BaseSkill, SkillResult\n\n"
+            "class UrlFetcherSkill(BaseSkill):\n"
+            '    name = "url_fetcher"\n'
+            '    description = "Fetch content from URLs"\n\n'
+            "    def _register_capabilities(self):\n"
+            '        self.register_capability("fetch", "Fetch URL content", '
+            '{"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]})\n\n'
+            "    async def execute(self, capability, **kwargs):\n"
+            '        url = kwargs.get("url", "")\n'
+            "        async with httpx.AsyncClient() as c:\n"
+            "            r = await c.get(url)\n"
+            '            return SkillResult(success=True, output=r.text[:2000])',
+        ),
+    ]
+
+
+def _skill_enabled(cfg: dict[str, Any], skill_name: str) -> bool:
+    """Check if a skill is enabled in config."""
+    return cfg.get("skills", {}).get("builtin", {}).get(skill_name, {}).get("enabled", False) if isinstance(
+        cfg.get("skills", {}).get("builtin", {}).get(skill_name), dict
+    ) else False
 
 
 def _load_yaml_config() -> dict[str, Any]:

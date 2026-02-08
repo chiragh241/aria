@@ -65,6 +65,12 @@ interface FullConfig {
     brave_key_set: boolean;
   };
   skills: Record<string, boolean>;
+  integrations?: {
+    notion: { enabled: boolean; api_key_set: boolean };
+    todoist: { enabled: boolean; api_key_set: boolean };
+    linear: { enabled: boolean; api_key_set: boolean };
+    spotify: { enabled: boolean; client_id_set: boolean; client_secret_set: boolean };
+  };
   dashboard: {
     port: number;
   };
@@ -94,6 +100,7 @@ const TABS = [
   { id: 'security', label: 'Security', icon: Shield },
   { id: 'browser', label: 'Browser', icon: Globe },
   { id: 'skills', label: 'Skills', icon: Puzzle },
+  { id: 'integrations', label: 'Integrations', icon: Key },
   { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'dashboard', label: 'Dashboard', icon: SettingsIcon },
 ] as const;
@@ -123,6 +130,11 @@ const SKILL_META: Record<string, { label: string; group: string; setup?: string 
   home: { label: 'Smart Home (HA)', group: 'JARVIS', setup: 'Set HA_URL and HA_TOKEN for Home Assistant.' },
   webhook: { label: 'Webhooks', group: 'JARVIS', setup: 'Send HTTP requests to URLs.' },
   agent: { label: 'Autonomous Agents', group: 'JARVIS', setup: 'Research, coding, and data analysis agents.' },
+  research: { label: 'Research', group: 'JARVIS', setup: 'Multi-source research agents.' },
+  notion: { label: 'Notion', group: 'Integrations', setup: 'Add API key in Integrations tab.' },
+  todoist: { label: 'Todoist', group: 'Integrations', setup: 'Add API key in Integrations tab.' },
+  linear: { label: 'Linear', group: 'Integrations', setup: 'Add API key in Integrations tab.' },
+  spotify: { label: 'Spotify', group: 'Integrations', setup: 'Add Client ID and Secret in Integrations tab.' },
 };
 
 // ── Main Component ───────────────────────────────────────────────────────────
@@ -212,6 +224,7 @@ export default function Settings() {
           {activeTab === 'security' && <SecurityTab config={config} />}
           {activeTab === 'browser' && <BrowserTab config={config} detection={detection} />}
           {activeTab === 'skills' && <SkillsTab config={config} />}
+          {activeTab === 'integrations' && <IntegrationsTab config={config} />}
           {activeTab === 'memory' && <MemoryTab config={config} />}
           {activeTab === 'dashboard' && <DashboardTab config={config} />}
         </div>
@@ -1499,15 +1512,209 @@ function BrowserTab({
   );
 }
 
+// ── Integrations Tab ─────────────────────────────────────────────────────────
+
+function IntegrationsTab({ config }: { config: FullConfig }) {
+  const queryClient = useQueryClient();
+  const integrations = config.integrations ?? {
+    notion: { enabled: false, api_key_set: false },
+    todoist: { enabled: false, api_key_set: false },
+    linear: { enabled: false, api_key_set: false },
+    spotify: { enabled: false, client_id_set: false, client_secret_set: false },
+  };
+  const [notionEnabled, setNotionEnabled] = useState(integrations.notion.enabled);
+  const [notionKey, setNotionKey] = useState('');
+  const [todoistEnabled, setTodoistEnabled] = useState(integrations.todoist.enabled);
+  const [todoistKey, setTodoistKey] = useState('');
+  const [linearEnabled, setLinearEnabled] = useState(integrations.linear.enabled);
+  const [linearKey, setLinearKey] = useState('');
+  const [spotifyEnabled, setSpotifyEnabled] = useState(integrations.spotify.enabled);
+  const [spotifyClientId, setSpotifyClientId] = useState('');
+  const [spotifyClientSecret, setSpotifyClientSecret] = useState('');
+  const [needsRestart, setNeedsRestart] = useState(false);
+
+  useEffect(() => {
+    setNotionEnabled(integrations.notion.enabled);
+    setTodoistEnabled(integrations.todoist.enabled);
+    setLinearEnabled(integrations.linear.enabled);
+    setSpotifyEnabled(integrations.spotify.enabled);
+  }, [integrations]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      await configApi.updateIntegrations({
+        notion_enabled: notionEnabled,
+        ...(notionKey && { notion_api_key: notionKey }),
+        todoist_enabled: todoistEnabled,
+        ...(todoistKey && { todoist_api_key: todoistKey }),
+        linear_enabled: linearEnabled,
+        ...(linearKey && { linear_api_key: linearKey }),
+        spotify_enabled: spotifyEnabled,
+        ...(spotifyClientId && { spotify_client_id: spotifyClientId }),
+        ...(spotifyClientSecret && { spotify_client_secret: spotifyClientSecret }),
+      });
+    },
+    onSuccess: () => {
+      setNeedsRestart(true);
+      setNotionKey('');
+      setTodoistKey('');
+      setLinearKey('');
+      setSpotifyClientId('');
+      setSpotifyClientSecret('');
+      queryClient.invalidateQueries({ queryKey: ['config'] });
+    },
+  });
+
+  const IntegrationCard = ({
+    name,
+    description,
+    enabled,
+    setEnabled,
+    keyLabel,
+    keyValue,
+    setKeyValue,
+    keyPlaceholder,
+    showKey = true,
+  }: {
+    name: string;
+    description: string;
+    enabled: boolean;
+    setEnabled: (v: boolean) => void;
+    keyLabel?: string;
+    keyValue?: string;
+    setKeyValue?: (v: string) => void;
+    keyPlaceholder?: string;
+    showKey?: boolean;
+  }) => (
+    <div className="py-4 border-b border-white/[0.06] last:border-0">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <p className="text-sm font-medium text-white">{name}</p>
+          <p className="text-xs text-slate-500">{description}</p>
+        </div>
+        <label className="cursor-pointer">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+            className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+        </label>
+      </div>
+      {showKey && setKeyValue && keyPlaceholder && (
+        <div className="mt-2">
+          <label className="block text-[11px] text-slate-500 mb-1 uppercase tracking-wider">{keyLabel ?? 'API Key'}</label>
+          <input
+            type="password"
+            value={keyValue ?? ''}
+            onChange={(e) => setKeyValue(e.target.value)}
+            placeholder={keyPlaceholder}
+            className="w-full px-3 py-2 glass-input text-sm"
+          />
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div>
+      <TabHeader title="Integrations" subtitle="Connect external services. Enable in Skills tab and add API keys below." />
+      <RestartBanner show={needsRestart} />
+
+      <SectionCard title="Notion">
+        <IntegrationCard
+          name="Notion"
+          description="Create pages, query databases, sync notes"
+          enabled={notionEnabled}
+          setEnabled={setNotionEnabled}
+          keyLabel="Integration secret"
+          keyValue={notionKey}
+          setKeyValue={setNotionKey}
+          keyPlaceholder={integrations.notion.api_key_set ? '••••••••' : 'secret_...'}
+        />
+      </SectionCard>
+
+      <SectionCard title="Todoist">
+        <IntegrationCard
+          name="Todoist"
+          description="Create and manage tasks from chat"
+          enabled={todoistEnabled}
+          setEnabled={setTodoistEnabled}
+          keyValue={todoistKey}
+          setKeyValue={setTodoistKey}
+          keyPlaceholder={integrations.todoist.api_key_set ? '••••••••' : 'API token from Todoist settings'}
+        />
+      </SectionCard>
+
+      <SectionCard title="Linear">
+        <IntegrationCard
+          name="Linear"
+          description="Manage issues from chat"
+          enabled={linearEnabled}
+          setEnabled={setLinearEnabled}
+          keyValue={linearKey}
+          setKeyValue={setLinearKey}
+          keyPlaceholder={integrations.linear.api_key_set ? '••••••••' : 'lin_api_...'}
+        />
+      </SectionCard>
+
+      <SectionCard title="Spotify">
+        <div className="py-4 border-b border-white/[0.06] last:border-0">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <p className="text-sm font-medium text-white">Spotify</p>
+              <p className="text-xs text-slate-500">Control playback, suggest playlists</p>
+            </div>
+            <label className="cursor-pointer">
+              <input
+                type="checkbox"
+                checked={spotifyEnabled}
+                onChange={(e) => setSpotifyEnabled(e.target.checked)}
+                className="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500"
+              />
+            </label>
+          </div>
+          <div className="mt-2 space-y-2">
+            <div>
+              <label className="block text-[11px] text-slate-500 mb-1 uppercase tracking-wider">Client ID</label>
+              <input
+                type="password"
+                value={spotifyClientId}
+                onChange={(e) => setSpotifyClientId(e.target.value)}
+                placeholder={integrations.spotify.client_id_set ? '••••••••' : 'From Spotify Developer Dashboard'}
+                className="w-full px-3 py-2 glass-input text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-500 mb-1 uppercase tracking-wider">Client Secret</label>
+              <input
+                type="password"
+                value={spotifyClientSecret}
+                onChange={(e) => setSpotifyClientSecret(e.target.value)}
+                placeholder={integrations.spotify.client_secret_set ? '••••••••' : 'From Spotify Developer Dashboard'}
+                className="w-full px-3 py-2 glass-input text-sm"
+              />
+            </div>
+          </div>
+        </div>
+      </SectionCard>
+
+      <SaveButton onClick={() => saveMutation.mutate()} loading={saveMutation.isPending} />
+    </div>
+  );
+}
+
 // ── Skills Tab ───────────────────────────────────────────────────────────────
 
 function SkillsTab({ config }: { config: FullConfig }) {
   const queryClient = useQueryClient();
-  const [skills, setSkills] = useState<Record<string, boolean>>({ ...config.skills });
+  const allSkillNames = Object.keys(SKILL_META);
+  const defaults = Object.fromEntries(allSkillNames.map((k) => [k, false]));
+  const [skills, setSkills] = useState<Record<string, boolean>>(() => ({ ...defaults, ...config.skills }));
   const [needsRestart, setNeedsRestart] = useState(false);
 
   useEffect(() => {
-    setSkills({ ...config.skills });
+    setSkills({ ...Object.fromEntries(allSkillNames.map((k) => [k, false])), ...config.skills });
   }, [config]);
 
   const saveMutation = useMutation({

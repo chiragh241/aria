@@ -98,6 +98,14 @@ class WizardState:
     )
     post_install_commands: list[str] = field(default_factory=list)
 
+    # Step 8: Integrations (Notion, Todoist, Linear, Spotify)
+    enabled_integrations: list[str] = field(default_factory=list)
+    notion_api_key: str = ""
+    todoist_api_key: str = ""
+    linear_api_key: str = ""
+    spotify_client_id: str = ""
+    spotify_client_secret: str = ""
+
 
 def run_wizard() -> bool:
     """Run the interactive setup wizard.
@@ -123,8 +131,8 @@ def run_wizard() -> bool:
 
     state = WizardState()
 
-    # ── Steps 1-7 ──────────────────────────────────────────────────────────
-    from src.cli.steps import browser, channels, dashboard, environment, llm, security, skills
+    # ── Steps 1-8 ──────────────────────────────────────────────────────────
+    from src.cli.steps import browser, channels, dashboard, environment, integrations, llm, security, skills
 
     steps = [
         ("LLM Provider", llm.run_step),
@@ -134,6 +142,7 @@ def run_wizard() -> bool:
         ("Security Profile", security.run_step),
         ("Browser", browser.run_step),
         ("Skills", skills.run_step),
+        ("Integrations", integrations.run_step),
     ]
 
     current_step = 0

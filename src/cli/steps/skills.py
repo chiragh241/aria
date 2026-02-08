@@ -122,6 +122,36 @@ SKILL_GROUPS = {
             "default": False,
         },
     },
+    "Integrations": {
+        "notion": {
+            "label": "Notion",
+            "pip": [],
+            "system": [],
+            "post_install": [],
+            "default": False,
+        },
+        "todoist": {
+            "label": "Todoist",
+            "pip": [],
+            "system": [],
+            "post_install": [],
+            "default": False,
+        },
+        "linear": {
+            "label": "Linear",
+            "pip": [],
+            "system": [],
+            "post_install": [],
+            "default": False,
+        },
+        "spotify": {
+            "label": "Spotify",
+            "pip": [],
+            "system": [],
+            "post_install": [],
+            "default": False,
+        },
+    },
 }
 
 
@@ -163,6 +193,7 @@ def run_step(console: Console, state: WizardState, detection: DetectionResults) 
         return False
 
     state.enabled_skills = selected
+    state.enabled_integrations = [s for s in selected if s in ("notion", "todoist", "linear", "spotify")]
 
     # Check dependencies for selected skills
     _check_dependencies(console, state, detection, selected)

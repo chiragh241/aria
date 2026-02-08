@@ -93,6 +93,45 @@ export const systemApi = {
     api.post('/system/reset'),
 };
 
+export const featuresApi = {
+  list: () =>
+    api.get('/features'),
+  toggle: (featureId: string, enabled: boolean) =>
+    api.put(`/features/${featureId}`, { enabled }),
+};
+
+export const pushApi = {
+  subscribe: (subscription: object) =>
+    api.post('/push/subscribe', subscription),
+};
+
+export const debugApi = {
+  getTrace: () =>
+    api.get('/debug/trace'),
+};
+
+export const skillTemplatesApi = {
+  list: () =>
+    api.get('/skill-templates'),
+};
+
+export const widgetsApi = {
+  list: () =>
+    api.get('/widgets'),
+  update: (widgets: object[]) =>
+    api.put('/widgets', { widgets }),
+};
+
+export const usageApi = {
+  getStats: () =>
+    api.get('/usage'),
+};
+
+export const exportApi = {
+  export: (type: 'all' | 'conversations' | 'audit' = 'all') =>
+    api.get('/export', { params: { type }, responseType: 'blob' }),
+};
+
 export const hudApi = {
   getVitals: () =>
     api.get('/hud/vitals'),
@@ -190,6 +229,10 @@ export const configApi = {
   /** Update skills config */
   updateSkills: (data: Record<string, any>) =>
     api.put('/config/skills', { data }),
+
+  /** Update integrations (Notion, Todoist, Linear, Spotify) */
+  updateIntegrations: (data: Record<string, any>) =>
+    api.put('/config/integrations', { data }),
 
   /** Update dashboard config */
   updateDashboard: (data: Record<string, any>) =>

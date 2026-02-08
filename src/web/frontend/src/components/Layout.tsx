@@ -11,12 +11,18 @@ import {
   Bot,
   Activity,
   LayoutDashboard,
+  Sun,
+  Moon,
+  Sparkles,
 } from 'lucide-react';
 import { systemApi } from '../services/api';
+import { useTheme } from '../contexts/ThemeContext';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 const navItems = [
   { path: '/chat', icon: MessageSquare, label: 'Chat' },
   { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { path: '/onboarding', icon: Sparkles, label: 'Setup' },
   { path: '/approvals', icon: Shield, label: 'Approvals' },
   { path: '/skills', icon: Puzzle, label: 'Skills' },
   { path: '/settings', icon: Settings, label: 'Settings' },
@@ -27,6 +33,14 @@ export default function Layout() {
   const { logout, user } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const { theme, setTheme, resolved } = useTheme();
+
+  useKeyboardShortcuts([
+    { key: '1', meta: true, handler: () => navigate('/chat') },
+    { key: '2', meta: true, handler: () => navigate('/dashboard') },
+    { key: '3', meta: true, handler: () => navigate('/dashboard') },
+    { key: 'k', meta: true, handler: () => navigate('/chat') },
+  ]);
 
   const { data: health } = useQuery({
     queryKey: ['health'],
@@ -114,6 +128,18 @@ export default function Layout() {
               </span>
             </div>
           </div>
+        </div>
+
+        {/* Theme toggle */}
+        <div className="px-3 py-2 flex items-center justify-between">
+          <span className="text-xs text-slate-500">Theme</span>
+          <button
+            onClick={() => setTheme(resolved === 'dark' ? 'light' : 'dark')}
+            className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] transition-all"
+            title={`Switch to ${resolved === 'dark' ? 'light' : 'dark'} mode`}
+          >
+            {resolved === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
         </div>
 
         {/* User section */}
