@@ -1,0 +1,76 @@
+# Aria - Sandboxed Execution Environment
+# Isolated container for running untrusted code/commands
+
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    SANDBOX_MODE=1
+
+# Install common tools and languages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Shell utilities
+    bash \
+    coreutils \
+    curl \
+    wget \
+    jq \
+    # Text processing
+    sed \
+    awk \
+    grep \
+    # File utilities
+    zip \
+    unzip \
+    tar \
+    gzip \
+    # Development tools
+    git \
+    # Node.js for JavaScript execution
+    nodejs \
+    npm \
+    # For media processing
+    ffmpeg \
+    imagemagick \
+    # For document processing
+    pandoc \
+    # Network tools (limited)
+    dnsutils \
+    # Cleanup
+    && rm -rf /var/lib/apt/lists/*
+
+# Install common Python packages
+RUN pip install --no-cache-dir \
+    requests \
+    httpx \
+    beautifulsoup4 \
+    lxml \
+    pandas \
+    numpy \
+    pillow \
+    pyyaml \
+    toml \
+    python-dateutil \
+    pytz
+
+# Create sandbox user with limited privileges
+RUN useradd -m -u 1000 -s /bin/bash sandbox && \
+    mkdir -p /workspace /output && \
+    chown -R sandbox:sandbox /workspace /output
+
+# Set resource limits via ulimit
+RUN echo "sandbox soft nproc 100" >> /etc/security/limits.conf && \
+    echo "sandbox hard nproc 200" >> /etc/security/limits.conf && \
+    echo "sandbox soft nofile 1024" >> /etc/security/limits.conf && \
+    echo "sandbox hard nofile 2048" >> /etc/security/limits.conf
+
+# Switch to sandbox user
+USER sandbox
+WORKDIR /workspace
+
+# Set restrictive PATH
+ENV PATH="/usr/local/bin:/usr/bin:/bin"
+
+# Default shell
+CMD ["/bin/bash"]

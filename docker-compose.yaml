@@ -1,0 +1,103 @@
+# Aria - Personal AI Assistant
+# Root-level compose file for convenience
+#
+# Usage:
+#   docker compose up -d --build              # Aria + WhatsApp only
+#   docker compose --profile redis up -d      # Include Redis
+#   docker compose --profile ollama up -d     # Include Ollama
+#   docker compose --profile all up -d        # Everything
+#   docker compose logs -f aria               # Watch Aria logs
+#   docker compose down                       # Stop all services
+#
+# After first start with ollama profile, pull the model:
+#   docker exec -it aria-ollama ollama pull llama3.1:8b
+
+services:
+  aria:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: aria-main
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    volumes:
+      - aria-data:/data
+      - ./config:/app/config:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
+    environment:
+      - ARIA_IN_CONTAINER=1
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - WHATSAPP_BRIDGE_HOST=whatsapp-bridge
+      - WHATSAPP_BRIDGE_PORT=3001
+      - HOST_PROJECT_DIR=${PWD}
+      - DATA_DIR=/data
+      - CHROMADB_PATH=/data/chromadb
+      - LOG_FILE=/data/logs/aria.log
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - aria-network
+
+  whatsapp-bridge:
+    build:
+      context: ./whatsapp-bridge
+      dockerfile: Dockerfile
+    container_name: aria-whatsapp
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - whatsapp-session:/app/session
+    environment:
+      - PORT=3001
+    networks:
+      - aria-network
+
+  # Optional: only starts with --profile redis or --profile all
+  redis:
+    image: redis:7-alpine
+    container_name: aria-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    profiles:
+      - redis
+      - all
+    volumes:
+      - redis-data:/data
+    networks:
+      - aria-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Optional: only starts with --profile ollama or --profile all
+  # If you run Ollama on the host, the aria container reaches it
+  # via host.docker.internal:11434 (set by OLLAMA_HOST above)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aria-ollama
+    restart: unless-stopped
+    profiles:
+      - ollama
+      - all
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - aria-network
+
+networks:
+  aria-network:
+    driver: bridge
+
+volumes:
+  aria-data:
+  whatsapp-session:
+  redis-data:
+  ollama-models:

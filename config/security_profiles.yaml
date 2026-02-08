@@ -1,0 +1,228 @@
+# Security Profiles for Aria
+# Each profile defines how different action types are handled
+
+profiles:
+  # Maximum security - everything requires approval
+  paranoid:
+    description: "Maximum security - all actions require explicit approval"
+    actions:
+      read_files:
+        action: approve
+        description: "Reading any file requires approval"
+      write_files:
+        action: approve
+        description: "Writing any file requires approval"
+      delete_files:
+        action: approve
+        description: "Deleting files requires approval"
+      shell_commands:
+        action: approve
+        description: "All shell commands require approval"
+      send_messages:
+        action: approve
+        description: "Sending external messages requires approval"
+      send_emails:
+        action: approve
+        description: "Sending emails requires approval"
+      web_requests:
+        action: approve
+        description: "All web requests require approval"
+      calendar_read:
+        action: approve
+        description: "Reading calendar requires approval"
+      calendar_write:
+        action: approve
+        description: "Modifying calendar requires approval"
+      skill_creation:
+        action: approve
+        description: "Creating new skills requires approval"
+
+  # Recommended default - balanced security
+  balanced:
+    description: "Balanced security for everyday use"
+    actions:
+      read_files:
+        action: auto
+        allowed_paths:
+          - "~/Documents"
+          - "~/Projects"
+          - "~/Downloads"
+        denied_paths:
+          - "~/.ssh"
+          - "~/.gnupg"
+          - "~/.aws"
+          - "~/.config"
+        description: "Auto-approve for allowed paths, deny sensitive paths"
+      write_files:
+        action: notify
+        allowed_paths:
+          - "~/Documents"
+          - "~/Projects"
+        denied_paths:
+          - "~/.ssh"
+          - "~/.gnupg"
+          - "/etc"
+          - "/usr"
+        description: "Notify user when writing to allowed paths"
+      delete_files:
+        action: approve
+        description: "File deletion always requires approval"
+      shell_commands:
+        action: approve
+        safe_commands:
+          - "ls"
+          - "pwd"
+          - "whoami"
+          - "date"
+          - "cat"
+          - "head"
+          - "tail"
+          - "grep"
+          - "find"
+          - "wc"
+          - "echo"
+        description: "Approve most commands, allow safe read-only commands"
+      send_messages:
+        action: approve
+        description: "External messaging requires approval"
+      send_emails:
+        action: approve
+        description: "Email sending requires approval"
+      web_requests:
+        action: auto
+        allowed_domains:
+          - "*.google.com"
+          - "*.github.com"
+          - "*.stackoverflow.com"
+          - "*.wikipedia.org"
+        denied_domains:
+          - "*.onion"
+        description: "Auto-approve trusted domains"
+      calendar_read:
+        action: auto
+        description: "Calendar reading is auto-approved"
+      calendar_write:
+        action: notify
+        description: "Notify when modifying calendar"
+      skill_creation:
+        action: approve
+        description: "Creating new skills requires approval"
+
+  # For trusted environments - minimal friction
+  trusted:
+    description: "Minimal security for trusted environments"
+    actions:
+      read_files:
+        action: auto
+        denied_paths:
+          - "~/.ssh/id_*"
+          - "~/.gnupg/private*"
+        description: "Auto-approve most file reads"
+      write_files:
+        action: auto
+        denied_paths:
+          - "/etc"
+          - "/usr"
+          - "/bin"
+          - "/sbin"
+        description: "Auto-approve most file writes"
+      delete_files:
+        action: notify
+        description: "Notify on file deletion"
+      shell_commands:
+        action: notify
+        denied_commands:
+          - "rm -rf /"
+          - "dd if=/dev/zero"
+          - "> /dev/sda"
+          - "mkfs"
+          - "fdisk"
+        description: "Notify on commands, block dangerous ones"
+      send_messages:
+        action: notify
+        description: "Notify when sending messages"
+      send_emails:
+        action: notify
+        description: "Notify when sending emails"
+      web_requests:
+        action: auto
+        description: "All web requests auto-approved"
+      calendar_read:
+        action: auto
+        description: "Calendar reading auto-approved"
+      calendar_write:
+        action: auto
+        description: "Calendar modification auto-approved"
+      skill_creation:
+        action: notify
+        description: "Notify when creating new skills"
+
+# Action types with their risk levels
+action_types:
+  read_files:
+    risk_level: low
+    category: filesystem
+    description: "Read file contents"
+
+  write_files:
+    risk_level: medium
+    category: filesystem
+    description: "Write or modify files"
+
+  delete_files:
+    risk_level: high
+    category: filesystem
+    description: "Delete files or directories"
+
+  shell_commands:
+    risk_level: high
+    category: execution
+    description: "Execute shell commands"
+
+  send_messages:
+    risk_level: medium
+    category: communication
+    description: "Send messages via WhatsApp, SMS, etc."
+
+  send_emails:
+    risk_level: medium
+    category: communication
+    description: "Send emails"
+
+  web_requests:
+    risk_level: low
+    category: network
+    description: "Make HTTP requests"
+
+  calendar_read:
+    risk_level: low
+    category: calendar
+    description: "Read calendar events"
+
+  calendar_write:
+    risk_level: medium
+    category: calendar
+    description: "Create or modify calendar events"
+
+  skill_creation:
+    risk_level: high
+    category: system
+    description: "Create new AI skills"
+
+# Approval response options
+approval_responses:
+  approve:
+    aliases: ["yes", "y", "approve", "ok", "allow", "permit", "go ahead"]
+    emoji: ["✅", "👍", "✓"]
+
+  deny:
+    aliases: ["no", "n", "deny", "reject", "block", "stop", "cancel"]
+    emoji: ["❌", "👎", "✗"]
+
+  approve_always:
+    aliases: ["always", "trust", "whitelist"]
+    description: "Approve this and similar future requests"
+
+  deny_always:
+    aliases: ["never", "blacklist", "block permanently"]
+    description: "Deny this and similar future requests"

@@ -1,0 +1,37 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+dist/
+build/
+
+# Node (whatsapp-bridge has its own)
+node_modules
+
+# Frontend build output (rebuilt in Docker)
+src/web/frontend/dist
+src/web/frontend/node_modules
+
+# Data (mounted as volume)
+data/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Env files (passed via docker-compose env_file)
+.env
+.env.local
+
+# Docker
+docker/

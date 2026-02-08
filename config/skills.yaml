@@ -1,0 +1,230 @@
+# Skills Registry for Aria
+# Defines all available skills and their configurations
+
+builtin_skills:
+  filesystem:
+    name: "Filesystem Operations"
+    description: "Read, write, and manage files and directories"
+    module: "aria.skills.builtin.filesystem"
+    class: "FilesystemSkill"
+    enabled: true
+    security:
+      action_types:
+        - read_files
+        - write_files
+        - delete_files
+    capabilities:
+      - read_file
+      - write_file
+      - append_file
+      - delete_file
+      - list_directory
+      - create_directory
+      - move_file
+      - copy_file
+      - get_file_info
+      - search_files
+
+  shell:
+    name: "Shell Commands"
+    description: "Execute terminal commands"
+    module: "aria.skills.builtin.shell"
+    class: "ShellSkill"
+    enabled: true
+    security:
+      action_types:
+        - shell_commands
+    capabilities:
+      - execute_command
+      - run_script
+
+  browser:
+    name: "Web Browser"
+    description: "Browse the web, extract content, fill forms"
+    module: "aria.skills.builtin.browser"
+    class: "BrowserSkill"
+    enabled: true
+    security:
+      action_types:
+        - web_requests
+    capabilities:
+      - navigate_to_url
+      - get_page_content
+      - extract_text
+      - extract_links
+      - take_screenshot
+      - fill_form
+      - click_element
+      - search_web
+
+  calendar:
+    name: "Calendar Management"
+    description: "Manage calendar events and schedules"
+    module: "aria.skills.builtin.calendar"
+    class: "CalendarSkill"
+    enabled: false
+    security:
+      action_types:
+        - calendar_read
+        - calendar_write
+    capabilities:
+      - list_events
+      - create_event
+      - update_event
+      - delete_event
+      - find_free_time
+
+  email:
+    name: "Email"
+    description: "Send and read emails"
+    module: "aria.skills.builtin.email"
+    class: "EmailSkill"
+    enabled: false
+    security:
+      action_types:
+        - send_emails
+    capabilities:
+      - send_email
+      - read_inbox
+      - search_emails
+      - reply_to_email
+
+  sms:
+    name: "SMS Messaging"
+    description: "Send SMS messages via Twilio"
+    module: "aria.skills.builtin.sms"
+    class: "SMSSkill"
+    enabled: false
+    security:
+      action_types:
+        - send_messages
+    capabilities:
+      - send_sms
+
+  tts:
+    name: "Text-to-Speech"
+    description: "Convert text to speech audio"
+    module: "aria.skills.builtin.tts"
+    class: "TTSSkill"
+    enabled: true
+    security:
+      action_types: []  # No special permissions needed
+    capabilities:
+      - text_to_speech
+      - list_voices
+
+  stt:
+    name: "Speech-to-Text"
+    description: "Transcribe audio to text using Whisper"
+    module: "aria.skills.builtin.stt"
+    class: "STTSkill"
+    enabled: true
+    security:
+      action_types:
+        - read_files
+    capabilities:
+      - transcribe_audio
+      - transcribe_file
+
+  image:
+    name: "Image Processing"
+    description: "Manipulate and analyze images"
+    module: "aria.skills.builtin.image"
+    class: "ImageSkill"
+    enabled: true
+    security:
+      action_types:
+        - read_files
+        - write_files
+    capabilities:
+      - resize_image
+      - crop_image
+      - convert_format
+      - add_watermark
+      - extract_text_ocr
+      - get_image_info
+
+  video:
+    name: "Video Processing"
+    description: "Process and convert videos using ffmpeg"
+    module: "aria.skills.builtin.video"
+    class: "VideoSkill"
+    enabled: true
+    security:
+      action_types:
+        - read_files
+        - write_files
+    capabilities:
+      - convert_video
+      - extract_audio
+      - trim_video
+      - get_video_info
+      - create_thumbnail
+
+  documents:
+    name: "Document Processing"
+    description: "Create and manipulate PDF and DOCX documents"
+    module: "aria.skills.builtin.documents"
+    class: "DocumentsSkill"
+    enabled: true
+    security:
+      action_types:
+        - read_files
+        - write_files
+    capabilities:
+      - create_pdf
+      - create_docx
+      - read_pdf
+      - merge_pdfs
+      - convert_to_pdf
+
+# Skill metadata schema for learned skills
+learned_skill_schema:
+  required_fields:
+    - name
+    - description
+    - version
+    - author
+    - capabilities
+  optional_fields:
+    - dependencies
+    - security
+    - configuration
+    - examples
+
+# Skill categories for organization
+categories:
+  filesystem:
+    name: "File System"
+    icon: "folder"
+    description: "File and directory operations"
+
+  execution:
+    name: "Execution"
+    icon: "terminal"
+    description: "Command and script execution"
+
+  network:
+    name: "Network"
+    icon: "globe"
+    description: "Web and network operations"
+
+  communication:
+    name: "Communication"
+    icon: "message"
+    description: "Messaging and email"
+
+  media:
+    name: "Media"
+    icon: "image"
+    description: "Audio, video, and image processing"
+
+  productivity:
+    name: "Productivity"
+    icon: "calendar"
+    description: "Calendar, documents, and organization"
+
+  ai:
+    name: "AI/ML"
+    icon: "brain"
+    description: "Machine learning and AI tools"

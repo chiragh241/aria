@@ -1,0 +1,154 @@
+# Aria - Personal AI Assistant
+# Full Stack Docker Compose Configuration
+#
+# Usage:
+#   cd docker
+#   cp ../.env .env                             # Copy your env file
+#   docker compose up -d --build                # Aria + WhatsApp only
+#   docker compose --profile redis up -d        # Include Redis
+#   docker compose --profile ollama up -d       # Include Ollama
+#   docker compose --profile all up -d          # Everything
+#   docker compose logs -f                      # Watch logs
+#   docker compose down                         # Stop all services
+
+services:
+  # Main Aria application
+  aria:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: aria-main
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    volumes:
+      # Persistent data
+      - aria-data:/data
+      # Configuration (read-only)
+      - ../config:/app/config:ro
+      # Docker socket for in-container rebuild
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Optional: Mount local files for access
+      - ~/Documents:/home/aria/Documents:ro
+      - ~/Projects:/home/aria/Projects:ro
+    env_file:
+      - ../.env
+    environment:
+      - ARIA_IN_CONTAINER=1
+      # Default: reach host Ollama; override with --profile ollama to use container
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      # WhatsApp bridge is on the Docker network, not localhost
+      - WHATSAPP_BRIDGE_HOST=whatsapp-bridge
+      - WHATSAPP_BRIDGE_PORT=3001
+      # Host project path for Docker rebuild from inside container
+      - HOST_PROJECT_DIR=${PWD}/..
+      # Paths inside container
+      - DATA_DIR=/data
+      - CHROMADB_PATH=/data/chromadb
+      - LOG_FILE=/data/logs/aria.log
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - aria-network
+
+  # WhatsApp Bridge (Node.js)
+  whatsapp-bridge:
+    build:
+      context: ../whatsapp-bridge
+      dockerfile: Dockerfile
+    container_name: aria-whatsapp
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - whatsapp-session:/app/session
+    environment:
+      - PORT=3001
+    networks:
+      - aria-network
+
+  # Redis for caching and pub/sub (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: aria-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    profiles:
+      - redis
+      - all
+    volumes:
+      - redis-data:/data
+    networks:
+      - aria-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Ollama for local LLM (optional — use host Ollama by default)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aria-ollama
+    restart: unless-stopped
+    profiles:
+      - ollama
+      - all
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - aria-network
+    # Uncomment for GPU support (NVIDIA)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # Sandbox container for isolated execution (optional)
+  sandbox:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sandbox
+    container_name: aria-sandbox
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - sandbox-workspace:/workspace
+      - sandbox-output:/output
+    profiles:
+      - sandbox
+
+networks:
+  aria-network:
+    driver: bridge
+
+volumes:
+  aria-data:
+    driver: local
+  whatsapp-session:
+    driver: local
+  redis-data:
+    driver: local
+  ollama-models:
+    driver: local
+  sandbox-workspace:
+    driver: local
+  sandbox-output:
+    driver: local

@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run build:*)",
+      "Bash(pip show:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.cognee.ai)",
+      "Bash(wc:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker system:*)",
+      "Bash(docker buildx:*)",
+      "Bash(source:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(lsof:*)",
+      "Bash(pip3 list:*)",
+      "Bash(conda env list:*)",
+      "Bash(/opt/homebrew/Caskroom/miniconda/base/bin/python:*)",
+      "Bash(/opt/homebrew/Caskroom/miniconda/base/bin/pip list:*)",
+      "Bash(/opt/homebrew/Caskroom/miniconda/base/bin/pip install:*)",
+      "Bash(pgrep:*)",
+      "Bash(echo:*)",
+      "Bash(xargs kill sleep 3 pgrep -f \"src.main\")",
+      "Bash(xargs kill:*)",
+      "Bash(kill:*)",
+      "Bash(:)",
+      "Bash(docker exec:*)"
+    ]
+  }
+}
