@@ -41,7 +41,7 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
    ```bash
    python -m src.main --setup
    ```
-   The wizard configures LLM providers, channels, skills, and integrations (Notion, Todoist, Linear, Spotify). When you choose Ollama, it detects your hardware (RAM, GPU) and suggests the best model—optionally downloading it for you.
+   The wizard configures LLM providers, channels, skills, and integrations (Notion, Todoist, Linear, Spotify). When you choose Ollama, it detects your hardware (RAM, GPU) and suggests the best model. Only models that support tool/function calling are recommended so skills work.
 
 3. **Set up environment**:
    ```bash
@@ -61,7 +61,7 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
    npm install
    ```
 
-6. **(Optional) Ollama models**: If you skipped the setup wizard, pull a model manually:
+6. **(Optional) Ollama models**: If you skipped the setup wizard, pull a tool-capable model (skills require function calling):
    ```bash
    ollama pull llama3.2:8b
    ```

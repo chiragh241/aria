@@ -640,11 +640,14 @@ def create_app(
     async def run_detection(user_id: str = Depends(get_current_user)):
         """Run system detection and return results."""
         from src.cli.detection import SystemDetector
+        from src.cli.hardware import model_supports_tools
 
         detector = SystemDetector()
         results = detector.run_all()
+        all_models = results.ollama.extra.get("models", [])
+        models = [m for m in all_models if model_supports_tools(m)]
         return {
-            "ollama": {"installed": results.ollama.installed, "running": results.ollama.running, "version": results.ollama.version, "models": results.ollama.extra.get("models", [])},
+            "ollama": {"installed": results.ollama.installed, "running": results.ollama.running, "version": results.ollama.version, "models": models},
             "docker": {"installed": results.docker.installed, "running": results.docker.running, "version": results.docker.version, "has_sandbox_image": results.docker.extra.get("has_sandbox_image", False)},
             "ffmpeg": {"installed": results.ffmpeg.installed, "version": results.ffmpeg.version},
             "playwright": {"installed": results.playwright.installed, "has_chromium": results.playwright.extra.get("has_chromium", False)},

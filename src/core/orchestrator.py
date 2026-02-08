@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from ..channels.base import BaseChannel
     from ..memory.rag import RAGPipeline
     from ..security.guardian import SecurityGuardian
+    from ..skills.generator import SkillGenerator
     from ..skills.registry import SkillRegistry
 
 logger = get_logger(__name__)
@@ -80,6 +81,9 @@ class Orchestrator:
         # Optional: vector memory (set externally)
         self._vector_memory: Any = None
 
+        # Skill generator for auto-learning new capabilities
+        self._skill_generator: "SkillGenerator | None" = None
+
         # User profile, entity extraction, summarizer (Phase 1)
         self._user_profile_manager: Any = None
         self._entity_extractor: Any = None
@@ -91,6 +95,10 @@ class Orchestrator:
 
         # Running state
         self._running = False
+
+    def set_skill_generator(self, generator: "SkillGenerator | None") -> None:
+        """Set the skill generator for auto-learning new capabilities."""
+        self._skill_generator = generator
 
     def set_user_profile_manager(self, pm: Any) -> None:
         self._user_profile_manager = pm
@@ -897,10 +905,60 @@ Just ask me what you need help with!"""
 
     def _get_available_tools(self) -> list[Tool]:
         """Get list of available tools for the LLM."""
-        if not self._skill_registry:
-            return []
+        tools: list[Tool] = []
 
-        tools = []
+        # Add create_skill tool when learning is enabled
+        if (
+            self._skill_generator
+            and self.settings.skills.learned.enabled
+        ):
+            tools.append(
+                Tool(
+                    name="create_skill",
+                    description=(
+                        "Create a new reusable skill when the user asks for something "
+                        "no existing skill can do. The skill is added immediately; you must then "
+                        "call it to complete the user's request (e.g. create restaurant_booking, "
+                        "then call restaurant_booking.book). Never stop at creating — execute it."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Skill name (snake_case, e.g. 'github_issues')",
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "What the skill does and when to use it",
+                            },
+                            "capabilities": {
+                                "type": "array",
+                                "description": "List of capabilities this skill provides",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "description": "Capability name (snake_case)",
+                                        },
+                                        "description": {
+                                            "type": "string",
+                                            "description": "What this capability does",
+                                        },
+                                    },
+                                    "required": ["name", "description"],
+                                },
+                            },
+                        },
+                        "required": ["name", "description", "capabilities"],
+                    },
+                )
+            )
+
+        if not self._skill_registry:
+            return tools
+
         for skill_info in self._skill_registry.list_skills():
             if not skill_info.get("enabled", True):
                 continue
@@ -1041,6 +1099,10 @@ Just ask me what you need help with!"""
         arguments: dict[str, Any],
     ) -> Any:
         """Execute a tool by name."""
+        # Handle create_skill (auto-learning) before skill.capability routing
+        if tool_name == "create_skill":
+            return await self._execute_create_skill(arguments)
+
         if not self._skill_registry:
             raise RuntimeError("Skill registry not available")
 
@@ -1056,6 +1118,69 @@ Just ask me what you need help with!"""
             raise ValueError(f"Skill not found: {skill_name}")
 
         return await skill.execute(capability_name, **arguments)
+
+    async def _execute_create_skill(self, arguments: dict[str, Any]) -> Any:
+        """Execute the create_skill tool to generate and save a new capability."""
+        if not self._skill_generator:
+            return {"success": False, "error": "Skill learning is not configured"}
+
+        name = arguments.get("name", "").strip()
+        description = arguments.get("description", "").strip()
+        capabilities = arguments.get("capabilities", [])
+
+        if not name or not description or not capabilities:
+            return {
+                "success": False,
+                "error": "name, description, and capabilities (each with name and description) are required",
+            }
+
+        # Normalize capability format
+        caps = []
+        for cap in capabilities:
+            if isinstance(cap, dict):
+                cap_name = cap.get("name", "").strip()
+                cap_desc = cap.get("description", "").strip()
+                if cap_name and cap_desc:
+                    caps.append({"name": cap_name, "description": cap_desc})
+
+        if not caps:
+            return {"success": False, "error": "At least one valid capability required"}
+
+        try:
+            skill = await self._skill_generator.generate(
+                name=name,
+                description=description,
+                capabilities=caps,
+            )
+
+            if skill.error:
+                return {"success": False, "error": skill.error}
+
+            path = await self._skill_generator.save(skill)
+            if not path:
+                return {"success": False, "error": "Failed to save skill (test or approval may have blocked it)"}
+
+            # Reload into registry so it's available immediately
+            if self._skill_registry:
+                loaded = await self._skill_registry.reload_learned_skill(name)
+                if loaded:
+                    return {
+                        "success": True,
+                        "message": f"Created skill '{name}' with {len(caps)} capability(ies). It is now available.",
+                        "path": path,
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "message": f"Created skill '{name}' at {path}. Restart may be needed to load it.",
+                        "path": path,
+                    }
+
+            return {"success": True, "message": f"Created skill '{name}'", "path": path}
+
+        except Exception as e:
+            logger.error("create_skill failed", error=str(e))
+            return {"success": False, "error": str(e)}
 
     def _sanitize_response(self, content: str) -> str:
         """Sanitize LLM response: strip raw tool-call JSON that leaked into text.
@@ -1132,6 +1257,11 @@ Just ask me what you need help with!"""
         substring matching.
         """
         tool_lower = tool_name.lower()
+
+        # Special tools
+        if tool_lower == "create_skill":
+            return "skill_creation"
+
         # Extract skill prefix (e.g. "shell" from "shell.execute")
         skill = tool_lower.split(".")[0] if "." in tool_lower else tool_lower
 

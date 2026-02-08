@@ -5,9 +5,9 @@ Checks RAM, CPU, and GPU to suggest the best local model for the user's machine.
 Model selection rationale:
 - Models are chosen from Ollama library (ollama.com/library) based on:
   - VRAM/RAM requirements (Ollama FAQ, community benchmarks)
-  - Popularity and quality (Llama, Mistral, Phi, Gemma are widely used)
+  - Tool/function calling support (required for Aria skills)
   - Size tiers: 1-3B (tiny), 7-9B (small), 12-14B (medium), 70B+ (large)
-- Each tier maps to min_ram_gb and min_vram_gb from typical GGUF Q4_K_M usage.
+- Only models that support tool calling are recommended so skills work.
 - When the user has models already downloaded, we compare them to hardware
   and suggest the best-fitting downloaded model if it beats our tier recommendation.
 """
@@ -194,7 +194,7 @@ def best_downloaded_model(
 ) -> tuple[str | None, str]:
     """
     Find the best-performing model among already-downloaded ones.
-    Only recommends models that will perform well (have headroom)—not just ones that fit.
+    Only recommends models that support tool calling (skills) and perform well.
     Picks the largest model that performs well; uses it if it beats our tier recommendation.
 
     Returns:
@@ -203,11 +203,11 @@ def best_downloaded_model(
     if not available_models:
         return None, ""
 
-    # Only consider models that will perform well (have headroom for smooth inference)
+    # Only consider models that support tools and will perform well
     performing_well = [
         (m, _model_quality_score(m))
         for m in available_models
-        if _model_performs_well(m, specs)
+        if model_supports_tools(m) and _model_performs_well(m, specs)
     ]
     if not performing_well:
         return None, ""
@@ -224,20 +224,45 @@ def best_downloaded_model(
     return None, ""
 
 
+# Model base names that support tool/function calling (required for skills)
+# See: https://ollama.com/search?c=tools and https://docs.ollama.com/capabilities/tool-calling
+OLLAMA_TOOL_SUPPORTED_PREFIXES = frozenset({
+    "llama3.1", "llama3.2", "llama4",
+    "qwen2", "qwen2.5", "qwen3",
+    "mistral-nemo", "ministral",
+    "command-r-plus", "firefunction", "devstral",
+    "granite4", "functiongemma",
+    "olmo-3.1", "rnj-1", "gpt-oss", "deepseek-v3.1",
+    "nemotron-3-nano", "lfm2.5-thinking", "glm-4.7-flash", "glm-ocr",
+    "qwen3-coder", "qwen3-coder-next", "qwen3-vl",
+    "mistral-small3.2",
+})
+
+
+def model_supports_tools(model_name: str) -> bool:
+    """Check if an Ollama model supports tool/function calling (required for skills)."""
+    if not model_name:
+        return False
+    base = model_name.split(":")[0].lower()
+    if base in OLLAMA_TOOL_SUPPORTED_PREFIXES:
+        return True
+    return any(base.startswith(p) or base == p for p in OLLAMA_TOOL_SUPPORTED_PREFIXES)
+
+
 # Model tiers: (model_name, min_ram_gb, min_vram_gb, description)
+# Only tool-capable models—skills require function calling
 OLLAMA_MODEL_TIERS = [
     # Tiny - 1-3B params
-    ("llama3.2:1b", 4, 2, "Tiny, fast—good for quick tasks"),
-    ("llama3.2:3b", 6, 4, "Small, efficient—lightweight assistant"),
-    ("phi3:mini", 6, 4, "Microsoft Phi—compact and capable"),
+    ("llama3.2:1b", 4, 2, "Tiny, fast—tool calling supported"),
+    ("llama3.2:3b", 6, 4, "Small, efficient—tool calling supported"),
+    ("qwen2.5:3b", 6, 4, "Qwen 3B—tool calling supported"),
     # Small - 7-8B params
     ("llama3.1:8b", 8, 6, "Balanced—recommended for most users"),
     ("llama3.2:8b", 8, 6, "Llama 3.2 8B—strong generalist"),
-    ("mistral:7b", 8, 6, "Mistral 7B—fast and capable"),
-    ("gemma2:9b", 10, 8, "Google Gemma—good quality/size ratio"),
+    ("qwen2.5:7b", 8, 6, "Qwen 7B—tool calling supported"),
+    ("qwen3:8b", 8, 6, "Qwen3 8B—tool calling supported"),
     # Medium - 12-14B params
-    ("llama3.1:8b-instruct-q4_0", 10, 8, "8B quantized—slightly smaller"),
-    ("codellama:13b", 16, 10, "Code specialist—13B params"),
+    ("ministral:8b", 10, 8, "Mistral Nemo family—tool calling"),
     ("llama3.1:70b-viewer", 48, 40, "70B viewer—needs 48GB+ RAM or 40GB+ VRAM"),
     # Large - 70B
     ("llama3.1:70b", 64, 48, "70B—best quality, needs high-end hardware"),

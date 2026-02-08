@@ -191,6 +191,11 @@ class AriaApplication:
         )
         await self.orchestrator.initialize()
 
+        # Wire skill generator for auto-learning
+        from src.skills.generator import SkillGenerator
+        skill_generator = SkillGenerator(llm_router=self.llm_router)
+        self.orchestrator.set_skill_generator(skill_generator)
+
         # Vector memory will be wired after initialization below
 
         # Initialize new systems

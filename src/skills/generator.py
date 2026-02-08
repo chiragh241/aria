@@ -370,7 +370,7 @@ Capabilities:
         # Create file
         file_path = self._learned_dir / f"{skill.name}.py"
 
-        # Add header and imports
+        # Add header and imports (absolute import for standalone learned skills)
         full_code = f'''"""
 Generated skill: {skill.name}
 Description: {skill.description}
@@ -380,7 +380,7 @@ Generated at: {skill.created_at.isoformat()}
 from datetime import datetime, timezone
 from typing import Any
 
-from ..base import BaseSkill, SkillResult
+from src.skills.base import BaseSkill, SkillResult
 
 
 {skill.code}

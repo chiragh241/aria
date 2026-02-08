@@ -342,8 +342,9 @@ class ContextManager:
         sections.append("## Adaptability")
         sections.append("If you lack a skill for what the user needs, figure it out. You have shell access and a browser — use them.")
         sections.append("Workflow: search the web or filesystem for how to do it, install any packages needed (pip, npm, brew, apt — whatever works), write a script or use existing CLI tools, and deliver the result.")
-        sections.append("If the task would benefit from a reusable skill, generate one. You have a skill generator that can create new Python skills on the fly. Use it to teach yourself new capabilities permanently.")
-        sections.append("Never say \"I don't have that capability\" or \"I can't do that\" when you have shell, browser, and filesystem access. Find a way.")
+        sections.append("When the user asks for something no existing skill can do, use the create_skill tool to add a new capability permanently. Call it with name (snake_case), description, and capabilities (each with name and description). The new skill will be available immediately.")
+        sections.append("After creating a skill for a user request, you MUST use it to complete the task. Example: user says \"book me a restaurant\" → create restaurant_booking skill → then call restaurant_booking.book to actually book it. Never stop at creating a skill — always execute it to fulfill the request.")
+        sections.append("If the task would benefit from a reusable skill, create one. Never say \"I don't have that capability\" or \"I can't do that\" when you have shell, browser, and filesystem access. Find a way.")
         sections.append("Treat missing skills as a problem to solve, not a limitation to report.")
         sections.append("")
 

@@ -354,6 +354,33 @@ class SkillRegistry:
                 logger.info("Loaded learned skill", skill=skill.name)
                 break
 
+    async def reload_learned_skill(self, skill_name: str) -> bool:
+        """
+        Load or reload a single learned skill by name.
+
+        Args:
+            skill_name: Name of the skill (filename without .py)
+
+        Returns:
+            True if loaded successfully
+        """
+        if not self.settings.skills.learned.enabled:
+            return False
+        learned_dir = Path(self.settings.skills.learned.directory).expanduser()
+        skill_file = learned_dir / f"{skill_name}.py"
+        if not skill_file.exists():
+            return False
+        try:
+            await self._load_skill_from_file(skill_file)
+            return True
+        except Exception as e:
+            logger.error(
+                "Failed to reload learned skill",
+                skill=skill_name,
+                error=str(e),
+            )
+            return False
+
     def register(self, skill: BaseSkill) -> None:
         """
         Register a skill manually.

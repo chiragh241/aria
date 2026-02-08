@@ -16,6 +16,7 @@ from src.cli.hardware import (
     detect_hardware,
     format_hardware_summary,
     get_suggested_models,
+    model_supports_tools,
     recommend_ollama_model,
 )
 from src.cli.styles import (
@@ -299,9 +300,9 @@ def _configure_ollama(
                 questionary.Choice(f"{model_name}{suffix}", value=f"_pull:{model_name}")
             )
 
-    # Add already-downloaded models not in suggested list
+    # Add already-downloaded models not in suggested list (only tool-capable models)
     for m in available_models:
-        if not any(c.value == m for c in model_choices):
+        if model_supports_tools(m) and not any(c.value == m for c in model_choices):
             title = f"{m} (Recommended)" if m == recommended_model else m
             model_choices.append(questionary.Choice(title, value=m))
 
