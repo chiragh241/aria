@@ -8,6 +8,7 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
 - **Smart Ollama Setup**: Hardware-detection during onboarding suggests the best model for your machine; can download it for you
 - **Multi-Channel**: Slack, WhatsApp (via web bridge), and Web UI
 - **Security**: Configurable profiles (paranoid, balanced, trusted) with approval workflows
+- **Self-Healing**: Monitors logs for errors, auto-fixes via patterns (pip install, etc.) or LLM suggestions; code edits require your approval in the Approvals UI with diff preview
 - **Sandboxed Execution**: Docker isolation for untrusted code
 - **Memory**: Short-term conversation, long-term vector store (ChromaDB), episodic task history, user profiles
 - **Knowledge Graph**: Cognee integration for entity/relationship extraction—synced with user profiles
@@ -79,6 +80,7 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
 - **"ChromaDB not installed"**: Reinstall dependencies: `pip install -e .` or `uv pip install -e .`
 - **vite.svg 404**: Rebuild the frontend: `cd src/web/frontend && npm run build`
 - **Self-healing not detecting errors**: It reads `data/logs/aria.log` every 10s. Terminal-only output (e.g. uvicorn access logs) may not be in the log file. Ask "check logs and fix" to trigger immediately.
+- **Self-healing code fixes**: When the LLM suggests a code fix, it appears in **Approvals** (dashboard). Review the file name and old/new diff, then Approve or Deny. Only approved edits are applied.
 
 ### Running
 
@@ -102,11 +104,12 @@ docker-compose up -d
 
 ### Configuration
 
-Edit `config/settings.yaml` to customize:
+Edit `config/settings.yaml` and `config/self_healing.yaml` to customize:
 - LLM providers and models
 - Channel settings (Slack, WhatsApp, Web)
 - Security profile
 - Memory, knowledge graph (Cognee), and sandbox options
+- **Self-healing** (`config/self_healing.yaml`): patterns for known errors, pip packages, LLM fallback (including `code_edit` with approval)
 - Skills and integrations (Notion, Todoist, Linear, Spotify)
 
 **Web UI**: After login, use **Setup** (onboarding) or **Settings** to select skills, add integration API keys, and configure the system.
@@ -128,12 +131,13 @@ Or ask **"What can you do?"** for a full capabilities list.
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        WEB DASHBOARD (React)                        │
 │   Chat │ Dashboard │ Setup │ Approvals │ Skills │ Settings │ Logs  │
+│   Approvals: tool actions + self-healing code edits (diff preview)   │
 └─────────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         CORE ORCHESTRATOR                           │
 │  Message Router │ Context Manager │ Security Guardian │ LLM Router  │
-│  Memory System │ Skill Engine                                       │
+│  Memory System │ Skill Engine │ Self-Healing                         │
 └─────────────────────────────────────────────────────────────────────┘
          │                    │                        │
 ┌────────────────┐  ┌─────────────────┐  ┌────────────────────────────┐
@@ -144,19 +148,21 @@ Or ask **"What can you do?"** for a full capabilities list.
 
 ## Security Profiles
 
-| Profile  | Read Files | Write Files | Shell | Messages | Web |
-|----------|------------|-------------|-------|----------|-----|
-| Paranoid | Approve    | Approve     | Approve| Approve | Approve |
-| Balanced | Auto*      | Notify      | Approve| Approve | Auto |
-| Trusted  | Auto       | Auto        | Notify | Notify  | Auto |
+| Profile  | Read Files | Write Files | Shell | Messages | Web | Code Edit |
+|----------|------------|-------------|-------|----------|-----|-----------|
+| Paranoid | Approve    | Approve     | Approve| Approve | Approve | Approve |
+| Balanced | Auto*      | Notify      | Approve| Approve | Auto | Approve |
+| Trusted  | Auto       | Auto        | Notify | Notify  | Auto | Approve |
 
-*Auto with path restrictions
+*Auto with path restrictions. **Code Edit**: Self-healing code fixes always require approval.
 
 ## Project Structure
 
 ```
 aria/
 ├── config/                 # Configuration files
+│   ├── settings.yaml      # Main config
+│   └── self_healing.yaml  # Error patterns, pip packages, LLM fallback
 ├── docker/                 # Docker files
 ├── src/
 │   ├── core/              # Orchestrator, LLM router, context
