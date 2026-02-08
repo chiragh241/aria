@@ -130,14 +130,14 @@ Or ask **"What can you do?"** for a full capabilities list.
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        WEB DASHBOARD (React)                        │
-│   Chat │ Dashboard │ Setup │ Approvals │ Skills │ Settings │ Logs  │
-│   Approvals: tool actions + self-healing code edits (diff preview)   │
+│   Chat │ Dashboard │ Setup │ Approvals │ Skills │ Settings │ Logs   │
+│   Approvals: tool actions + self-healing code edits (diff preview)  │
 └─────────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         CORE ORCHESTRATOR                           │
 │  Message Router │ Context Manager │ Security Guardian │ LLM Router  │
-│  Memory System │ Skill Engine │ Self-Healing                         │
+│  Memory System │ Skill Engine │ Self-Healing                        │
 └─────────────────────────────────────────────────────────────────────┘
          │                    │                        │
 ┌────────────────┐  ┌─────────────────┐  ┌────────────────────────────┐
