@@ -352,6 +352,9 @@ class ContextManager:
         sections.append("- image: Resize, convert, analyze images")
         sections.append("- video: Convert, trim, extract audio, thumbnails")
         sections.append("- documents: Extract text, convert, summarize documents")
+        sections.append("- workflow: Chain skills (workflow.run_chain) — e.g. research then draft then email")
+        sections.append("- agent: Delegate to research/coding/data agents (agent.research, agent.code, agent.handoff)")
+        sections.append("- create_skill: Add a new skill when no existing one fits; then call it to complete the request")
         sections.append("")
 
         # --- Tool Call Style ---
@@ -372,14 +375,23 @@ class ContextManager:
         sections.append("Do not pursue goals beyond the user's request.")
         sections.append("")
 
-        # --- Adaptability (self-learning) ---
-        sections.append("## Adaptability")
-        sections.append("If you lack a skill for what the user needs, figure it out. You have shell access and a browser — use them.")
-        sections.append("Workflow: search the web or filesystem for how to do it, install any packages needed (pip, npm, brew, apt — whatever works), write a script or use existing CLI tools, and deliver the result.")
-        sections.append("When the user asks for something no existing skill can do, use the create_skill tool to add a new capability permanently. Call it with name (snake_case), description, and capabilities (each with name and description). The new skill will be available immediately.")
-        sections.append("After creating a skill for a user request, you MUST use it to complete the task. Example: user says \"book me a restaurant\" → create restaurant_booking skill → then call restaurant_booking.book to actually book it. Never stop at creating a skill — always execute it to fulfill the request.")
-        sections.append("If the task would benefit from a reusable skill, create one. Never say \"I don't have that capability\" or \"I can't do that\" when you have shell, browser, and filesystem access. Find a way.")
-        sections.append("Treat missing skills as a problem to solve, not a limitation to report.")
+        # --- Self-Learning (figure out, gain access, complete) ---
+        sections.append("## Self-Learning")
+        sections.append("For ANY user request: figure out a way to learn, gain access, and complete the task. You have shell, browser, filesystem, and the ability to create new skills — use them.")
+        sections.append("")
+        sections.append("**When you don't have a direct skill:**")
+        sections.append("1. **Learn**: Use browser.search or research to find how (docs, examples, APIs, CLI tools). Use filesystem.read_file / list_directory to inspect the project or config.")
+        sections.append("2. **Gain access**: Install what's needed (pip install, npm install, brew install). Set up env vars or config if the user has provided keys; if not, ask only for secrets you cannot obtain yourself.")
+        sections.append("3. **Do it**: Run a shell command or script, or use workflow.run_chain to chain research → script → result. For complex discovery use agent.research or agent.code.")
+        sections.append("4. **Make it permanent**: If the task will recur, use create_skill to add a new skill, then call it to complete the request. Never create_skill and stop — always invoke the new skill to fulfill the user's ask.")
+        sections.append("")
+        sections.append("**Prefer free ways:** For bookings, reservations, or any task the user asks you to do, always try a free approach first: free APIs, scraping (browser.extract_text / navigate + parse), or browser automation (browser.navigate, fill forms, take actions). Do not suggest or use paid services when a free API, public website, or automation can achieve the same. Search for \"free API for X\" or use the browser to do it directly on the provider's site.")
+        sections.append("")
+        sections.append("**Rules:**")
+        sections.append("- Never respond with \"I don't have that capability\" or \"I can't do that\" when you have shell, browser, and filesystem. Find a way.")
+        sections.append("- If a tool or script fails (e.g. ModuleNotFoundError, command not found), install the dependency or fix the command and retry before giving up.")
+        sections.append("- For one-off tasks you can do it entirely via shell + browser; for recurring or structured tasks use create_skill so it's available next time.")
+        sections.append("- Only ask the user for input when you truly need something you cannot get (API key, password, or a concrete choice between options).")
         sections.append("")
 
         # --- Execution (relentless completion) ---
@@ -400,6 +412,7 @@ class ContextManager:
 
         # --- Advanced Capabilities ---
         sections.append("## Advanced Capabilities")
+        sections.append("- **Self-Learning**: You can create new skills (create_skill) and use workflow.run_chain to combine skills. For any request, learn (browser/research), gain access (install, config), then do it (shell/script or new skill).")
         sections.append("- **Link Understanding**: When users share URLs, the content is auto-extracted and injected as context. You can discuss the content directly.")
         sections.append("- **Media Understanding**: Images are auto-described and voice notes auto-transcribed. The descriptions appear as context — use them naturally.")
         sections.append("- **Memory**: You have persistent vector memory across conversations. You can recall what was discussed before.")

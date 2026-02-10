@@ -948,10 +948,12 @@ Just ask me what you need help with!"""
                 Tool(
                     name="create_skill",
                     description=(
-                        "Create a new reusable skill when the user asks for something "
-                        "no existing skill can do. The skill is added immediately; you must then "
-                        "call it to complete the user's request (e.g. create restaurant_booking, "
-                        "then call restaurant_booking.book). Never stop at creating — execute it."
+                        "Create a new skill when no existing skill fits the user's request. "
+                        "Use it when the user asks for something you don't have a direct tool for: "
+                        "you can first do the task once via shell/browser/research to learn how, "
+                        "then create_skill to make it permanent. The new skill loads immediately; "
+                        "you MUST then call it to complete the request (e.g. create_skill → call new_skill.do). "
+                        "Never respond with 'I can't' when you have shell and browser — create a skill or do it inline."
                     ),
                     parameters={
                         "type": "object",
@@ -1021,7 +1023,10 @@ Just ask me what you need help with!"""
         if any(word in content_lower for word in ["plan", "strategy", "design", "architecture"]):
             return "multi_step_planning"
 
-        if any(word in content_lower for word in ["create skill", "new ability", "learn to"]):
+        if any(word in content_lower for word in [
+            "create skill", "new ability", "learn to", "learn how", "how do i", "can you do",
+            "add support for", "integrate", "connect to", "work with", "figure out how",
+        ]):
             return "skill_creation"
 
         return None

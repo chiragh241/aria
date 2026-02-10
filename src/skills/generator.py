@@ -178,8 +178,9 @@ Rules:
 3. Return SkillResult using _success_result or _error_result
 4. Include proper type hints
 5. Handle errors gracefully
-6. Use only standard library or common packages
-7. Keep code simple and focused
+6. You may use: standard library, requests, aiohttp, subprocess, asyncio. For CLI tools use subprocess; for HTTP APIs use requests or aiohttp.
+7. To gain access to API keys or config: accept parameters (e.g. api_key, token) or read from os.environ.get("SERVICE_API_KEY") so the user can set env vars. Document required env vars in the capability description if needed.
+8. Keep code simple and focused. If the task needs an external CLI, use subprocess to run it.
 """
 
     def _build_generation_prompt(
@@ -202,6 +203,10 @@ Description: {description}
 
 Capabilities:
 {caps_text}
+
+If this skill needs external access (APIs, CLI tools): accept api_key/token as parameters or read from os.environ. Use requests/aiohttp for HTTP, subprocess for CLI. Make the skill self-contained and robust to missing config (return clear error asking for the key or env var).
+
+Prefer free options: use free/public APIs when possible; for bookings or actions on websites, consider browser automation or scraping public pages rather than paid APIs.
 """
 
         if examples:
