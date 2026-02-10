@@ -51,6 +51,11 @@ class MessageRequest(BaseModel):
     channel: str = "web"
 
 
+class MessageEditRequest(BaseModel):
+    message_id: str
+    new_content: str
+
+
 class MessageResponse(BaseModel):
     id: str
     content: str
@@ -249,17 +254,19 @@ def create_app(
         if not context:
             return {"messages": []}
         messages = context.get_messages(limit)
-        return {
-            "messages": [
-                {
-                    "role": m.role,
-                    "content": m.content,
-                    "timestamp": m.timestamp.isoformat() if hasattr(m, "timestamp") else None,
-                }
-                for m in messages
-                if m.role != "system"
-            ]
-        }
+        start_idx = max(0, len(context.messages) - len(messages))
+        out = []
+        for j, m in enumerate(messages):
+            if m.role == "system":
+                continue
+            idx = start_idx + j
+            out.append({
+                "role": m.role,
+                "content": m.content,
+                "message_id": context.message_ids.get(idx),
+                "index": idx,
+            })
+        return {"messages": out}
 
     @api.delete("/chat/history")
     async def clear_chat_history(user_id: str = Depends(get_current_user)):
@@ -268,6 +275,103 @@ def create_app(
                 channel="web", user_id=user_id
             )
         return {"cleared": True}
+
+    @api.post("/chat/edit")
+    async def edit_message(
+        request: MessageEditRequest,
+        user_id: str = Depends(get_current_user),
+    ):
+        if not app.state.orchestrator:
+            raise HTTPException(status_code=503, detail="Orchestrator not available")
+        response = await app.state.orchestrator.chat_edit(
+            channel="web",
+            user_id=user_id,
+            message_id=request.message_id,
+            new_content=request.new_content,
+        )
+        return {"response": response}
+
+    @api.get("/chat/search")
+    async def search_conversations(
+        q: str = Query(..., min_length=1),
+        limit: int = Query(10, ge=1, le=50),
+        user_id: str = Depends(get_current_user),
+    ):
+        if not app.state.orchestrator:
+            return {"results": []}
+        results = await app.state.orchestrator.context_manager.search_conversations(
+            query=q, user_id=user_id, top_k=limit
+        )
+        return {"results": results}
+
+    @api.post("/chat/checkpoint")
+    async def save_checkpoint(
+        name: str = Query(...),
+        user_id: str = Depends(get_current_user),
+    ):
+        if not app.state.orchestrator:
+            raise HTTPException(status_code=503, detail="Orchestrator not available")
+        snapshot = await app.state.orchestrator.context_manager.save_checkpoint(
+            channel="web", user_id=user_id, name=name
+        )
+        if not snapshot:
+            raise HTTPException(status_code=404, detail="No conversation to checkpoint")
+        return {"checkpoint": snapshot}
+
+    @api.get("/chat/checkpoint/{name}")
+    async def load_checkpoint(
+        name: str,
+        user_id: str = Depends(get_current_user),
+    ):
+        if not app.state.orchestrator:
+            raise HTTPException(status_code=503, detail="Orchestrator not available")
+        snapshot = await app.state.orchestrator.context_manager.load_checkpoint(
+            channel="web", user_id=user_id, name=name
+        )
+        if not snapshot:
+            raise HTTPException(status_code=404, detail="Checkpoint not found")
+        return {"checkpoint": snapshot}
+
+    @api.post("/chat/branch")
+    async def create_branch(
+        from_index: int = Query(..., ge=0),
+        user_id: str = Depends(get_current_user),
+    ):
+        if not app.state.orchestrator:
+            raise HTTPException(status_code=503, detail="Orchestrator not available")
+        branch = await app.state.orchestrator.context_manager.create_branch(
+            channel="web", user_id=user_id, from_message_index=from_index
+        )
+        if not branch:
+            raise HTTPException(status_code=400, detail="Could not create branch")
+        return {"branch_id": branch.branch_id, "context_id": branch.id}
+
+    @api.get("/chat/branches")
+    async def list_branches(user_id: str = Depends(get_current_user)):
+        if not app.state.orchestrator:
+            return {"branches": []}
+        branches = await app.state.orchestrator.context_manager.list_branches(
+            channel="web", user_id=user_id
+        )
+        return {"branches": branches}
+
+    @api.post("/proactive/focus")
+    async def set_focus_mode(
+        enabled: bool = Query(...),
+        user_id: str = Depends(get_current_user),
+    ):
+        engine = getattr(app.state, "proactive_engine", None)
+        if not engine:
+            raise HTTPException(status_code=503, detail="Proactive engine not available")
+        engine.set_focus_mode(user_id, enabled)
+        return {"focus_mode": enabled}
+
+    @api.get("/proactive/focus")
+    async def get_focus_mode(user_id: str = Depends(get_current_user)):
+        engine = getattr(app.state, "proactive_engine", None)
+        if not engine:
+            return {"focus_mode": False}
+        return {"focus_mode": engine.is_focus_mode(user_id)}
 
     # -- Approvals --
 

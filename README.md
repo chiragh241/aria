@@ -16,6 +16,7 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
 - **Integrations**: Notion, Todoist, Linear, Spotify (API keys configurable in Settings or onboarding)
 - **Built-in Skills**: File ops, shell, browser, calendar, email, SMS, TTS, STT, image, video, documents, weather, research, agent, memory, finance, news, contacts, tracking, webhook, home, notion, todoist, linear, spotify
 - **Dynamic Skills**: AI can generate new skills on demand
+- **OneContext**: Unified context across all channels and agents — share and load context so anyone on web, Slack, or WhatsApp can continue from the same point ([OneContext](https://github.com/TheAgentContextLab/OneContext)). Enabled by default.
 - **Web Dashboard**: Chat, approvals, settings, logs, skills, setup onboarding, cost/usage widgets, data export
 - **Slash Commands**: `/help`, `/clear`, `/status`, `/skills`, `/capabilities` in web chat and all channels
 - **"What can you do"**: Ask in plain language for a detailed list of skills and how to trigger them
@@ -81,6 +82,7 @@ A fully-featured personal AI assistant that runs locally with hybrid LLM support
 - **vite.svg 404**: Rebuild the frontend: `cd src/web/frontend && npm run build`
 - **Self-healing not detecting errors**: It reads `data/logs/aria.log` every 10s. Terminal-only output (e.g. uvicorn access logs) may not be in the log file. Ask "check logs and fix" to trigger immediately.
 - **Self-healing code fixes**: When the LLM suggests a code fix, it appears in **Approvals** (dashboard). Review the file name and old/new diff, then Approve or Deny. Only approved edits are applied.
+- **OneContext (unified agent context)**: Install `npm i -g onecontext-ai` and enable `onecontext.enabled: true` in config. Use `context_skill.share_context` and `context_skill.load_context` to share/load context. All agents (research, coding, data) share the same context.
 
 ### Running
 

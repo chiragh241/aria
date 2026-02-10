@@ -37,12 +37,38 @@ class ConversationContext:
     # User preferences extracted from conversation
     preferences: dict[str, Any] = field(default_factory=dict)
 
+    # Branching: branch_id for alternative paths, parent_id for branch origin
+    branch_id: str = ""
+    parent_id: str = ""
+
+    # Per-topic context (e.g. project_alpha, work, personal)
+    topic_id: str = ""
+
+    # Message IDs for branching and inline edits (index -> id)
+    message_ids: dict[int, str] = field(default_factory=dict)
+
     def add_message(self, role: str, content: str, **kwargs: Any) -> LLMMessage:
         """Add a message to the conversation."""
         message = LLMMessage(role=role, content=content, **kwargs)
         self.messages.append(message)
         self.updated_at = datetime.now(timezone.utc)
+        msg_id = str(uuid4())[:8]
+        self.message_ids[len(self.messages) - 1] = msg_id
         return message
+
+    def truncate_after_message_index(self, index: int) -> None:
+        """Truncate messages after the given index (for inline edit / branch)."""
+        if 0 <= index < len(self.messages):
+            self.messages = self.messages[: index + 1]
+            self.message_ids = {i: sid for i, sid in self.message_ids.items() if i <= index}
+            self.updated_at = datetime.now(timezone.utc)
+
+    def get_message_index_by_id(self, message_id: str) -> int | None:
+        """Get message index by stored message_id. Returns None if not found."""
+        for i, mid in self.message_ids.items():
+            if mid == message_id:
+                return i
+        return None
 
     def add_user_message(self, content: str) -> LLMMessage:
         """Add a user message."""
@@ -145,6 +171,10 @@ class ConversationContext:
             "active": self.active,
             "variables": self.variables,
             "preferences": self.preferences,
+            "branch_id": self.branch_id,
+            "parent_id": self.parent_id,
+            "topic_id": self.topic_id,
+            "message_ids": self.message_ids,
         }
 
     @classmethod
@@ -186,6 +216,10 @@ class ConversationContext:
             active=data.get("active", True),
             variables=data.get("variables", {}),
             preferences=data.get("preferences", {}),
+            branch_id=data.get("branch_id", ""),
+            parent_id=data.get("parent_id", ""),
+            topic_id=data.get("topic_id", ""),
+            message_ids={int(k): v for k, v in data.get("message_ids", {}).items()},
         )
 
 
@@ -380,15 +414,18 @@ class ContextManager:
 
         return "\n".join(sections)
 
-    def _get_context_key(self, channel: str, user_id: str) -> str:
-        """Generate a unique key for a context."""
-        return f"{channel}:{user_id}"
+    def _get_context_key(self, channel: str, user_id: str, branch_id: str = "") -> str:
+        """Generate a unique key for a context. Main thread: channel:user_id. Branch: channel:user_id:branch_id."""
+        base = f"{channel}:{user_id}"
+        return f"{base}:{branch_id}" if branch_id else base
 
     async def get_context(
         self,
         channel: str,
         user_id: str,
         create_if_missing: bool = True,
+        branch_id: str = "",
+        topic_id: str = "",
     ) -> ConversationContext | None:
         """
         Get or create a conversation context.
@@ -401,11 +438,14 @@ class ContextManager:
         Returns:
             The conversation context, or None if not found and create_if_missing is False
         """
-        key = self._get_context_key(channel, user_id)
+        key = self._get_context_key(channel, user_id, branch_id)
 
         async with self._lock:
             if key in self._contexts:
-                return self._contexts[key]
+                ctx = self._contexts[key]
+                if topic_id and not ctx.topic_id:
+                    ctx.topic_id = topic_id
+                return ctx
 
             if not create_if_missing:
                 return None
@@ -414,6 +454,8 @@ class ContextManager:
             context = ConversationContext(
                 channel=channel,
                 user_id=user_id,
+                branch_id=branch_id,
+                topic_id=topic_id,
             )
 
             # Add system message
@@ -433,19 +475,110 @@ class ContextManager:
 
     async def update_context(self, context: ConversationContext) -> None:
         """Update a context in storage and persist to disk."""
-        key = self._get_context_key(context.channel, context.user_id)
+        key = self._get_context_key(context.channel, context.user_id, context.branch_id)
         async with self._lock:
             self._contexts[key] = context
             self._persist_context(key, context)
 
     async def save_context(self, context: ConversationContext) -> None:
         """Save a context to disk (call after adding messages)."""
-        key = self._get_context_key(context.channel, context.user_id)
+        key = self._get_context_key(context.channel, context.user_id, context.branch_id)
         self._persist_context(key, context)
 
-    async def delete_context(self, channel: str, user_id: str) -> bool:
+    async def search_conversations(
+        self, query: str, channel: str = "", user_id: str = "", top_k: int = 10
+    ) -> list[dict[str, Any]]:
+        """Search past conversations via vector memory."""
+        if not self._vector_memory or not self._vector_memory.available:
+            return []
+        try:
+            results = await self._vector_memory.search_messages(query, top_k=top_k)
+            filtered = results
+            if channel:
+                filtered = [r for r in results if r.get("metadata", {}).get("channel") == channel]
+            if user_id:
+                filtered = [r for r in filtered if r.get("metadata", {}).get("user_id") == user_id]
+            return filtered
+        except Exception as e:
+            logger.warning("Conversation search failed", error=str(e))
+            return []
+
+    async def save_checkpoint(
+        self, channel: str, user_id: str, name: str
+    ) -> dict[str, Any] | None:
+        """Save current conversation state as a named checkpoint."""
+        context = await self.get_context(channel, user_id, create_if_missing=False)
+        if not context:
+            return None
+        snapshot = {
+            "name": name,
+            "messages": [
+                {"role": m.role, "content": m.content}
+                for m in context.messages
+                if m.role != "system"
+            ],
+            "topic_id": context.topic_id,
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+        }
+        context.set_variable(f"checkpoint_{name}", snapshot)
+        await self.update_context(context)
+        return snapshot
+
+    async def load_checkpoint(
+        self, channel: str, user_id: str, name: str
+    ) -> dict[str, Any] | None:
+        """Load a saved checkpoint. Returns snapshot dict or None."""
+        context = await self.get_context(channel, user_id, create_if_missing=False)
+        if not context:
+            return None
+        return context.get_variable(f"checkpoint_{name}")
+
+    async def create_branch(
+        self, channel: str, user_id: str, from_message_index: int
+    ) -> ConversationContext | None:
+        """Create a new branch from the current conversation at the given message index."""
+        parent = await self.get_context(channel, user_id, create_if_missing=False)
+        if not parent or from_message_index < 0 or from_message_index >= len(parent.messages):
+            return None
+        branch_id = str(uuid4())[:8]
+        key = self._get_context_key(channel, user_id, branch_id)
+        async with self._lock:
+            branch = ConversationContext(
+                channel=channel,
+                user_id=user_id,
+                branch_id=branch_id,
+                parent_id=parent.id,
+                topic_id=parent.topic_id,
+            )
+            system_msg = next((m for m in parent.messages if m.role == "system"), None)
+            if system_msg:
+                branch.add_message("system", system_msg.content)
+            for i in range(1, from_message_index + 1):
+                if i < len(parent.messages):
+                    m = parent.messages[i]
+                    branch.add_message(m.role, m.content, tool_calls=m.tool_calls, tool_call_id=m.tool_call_id)
+            self._contexts[key] = branch
+            self._persist_context(key, branch)
+        return branch
+
+    async def list_branches(self, channel: str, user_id: str) -> list[dict[str, Any]]:
+        """List all branches for a channel/user."""
+        prefix = f"{channel}:{user_id}:"
+        async with self._lock:
+            return [
+                {
+                    "branch_id": ctx.branch_id,
+                    "parent_id": ctx.parent_id,
+                    "message_count": len(ctx.messages),
+                    "updated_at": ctx.updated_at.isoformat(),
+                }
+                for key, ctx in self._contexts.items()
+                if key.startswith(prefix)
+            ]
+
+    async def delete_context(self, channel: str, user_id: str, branch_id: str = "") -> bool:
         """Delete a conversation context from memory and disk."""
-        key = self._get_context_key(channel, user_id)
+        key = self._get_context_key(channel, user_id, branch_id)
         async with self._lock:
             if key in self._contexts:
                 del self._contexts[key]

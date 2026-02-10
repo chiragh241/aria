@@ -156,6 +156,13 @@ class ConfigWriter:
             },
         }
 
+        # onecontext — unified context across all channels
+        config["onecontext"] = {
+            "enabled": "onecontext" in getattr(s, "enabled_skills", []),
+            "working_path": "./data/aria_workspace",
+            "sync_on_agent_complete": True,
+        }
+
         return config
 
     def _build_llm_config(self) -> dict[str, Any]:

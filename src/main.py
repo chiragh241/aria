@@ -292,6 +292,17 @@ class AriaApplication:
         agent_skill = self.skill_registry.get_skill("agent")
         if agent_skill:
             agent_skill.set_coordinator(self.agent_coordinator)
+        context_skill = self.skill_registry.get_skill("context_skill")
+        if context_skill:
+            context_skill.set_coordinator(self.agent_coordinator)
+            context_skill.set_context_manager(self.context_manager)
+
+        # Workflow engine for skill chaining
+        from src.core.workflow_engine import WorkflowEngine
+        workflow_engine = WorkflowEngine(skill_registry=self.skill_registry)
+        workflow_skill = self.skill_registry.get_skill("workflow")
+        if workflow_skill:
+            workflow_skill.set_engine(workflow_engine)
 
         # Initialize channels
         logger.info("Initializing channels...")

@@ -97,6 +97,7 @@ class WizardState:
         ]
     )
     post_install_commands: list[str] = field(default_factory=list)
+    npm_packages_to_install: list[str] = field(default_factory=list)
 
     # Step 8: Integrations (Notion, Todoist, Linear, Spotify)
     enabled_integrations: list[str] = field(default_factory=list)
@@ -344,6 +345,27 @@ def _finalize(console: Console, state: WizardState) -> bool:
                     )
             except Exception as e:
                 console.print(f"  [{WARNING}]{ICON_WARN}[/{WARNING}] Error: {e}")
+
+    # Install npm packages for selected skills (e.g. onecontext-ai)
+    if getattr(state, "npm_packages_to_install", []):
+        console.print(f"\n  [{MUTED}]{ICON_GEAR} Installing npm packages...")
+        for pkg in state.npm_packages_to_install:
+            console.print(f"  [{MUTED}]{ICON_ARROW} npm i -g {pkg}")
+            try:
+                result = subprocess.run(
+                    ["npm", "i", "-g", pkg],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if result.returncode == 0:
+                    console.print(f"  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] {pkg} installed")
+                else:
+                    console.print(
+                        f"  [{WARNING}]{ICON_WARN}[/{WARNING}] {pkg} failed: {result.stderr[:100]}"
+                    )
+            except Exception as e:
+                console.print(f"  [{WARNING}]{ICON_WARN}[/{WARNING}] {pkg} error: {e}")
 
     # Docker deployment: build and start all containers
     if state.deployment_mode == "docker":

@@ -209,6 +209,20 @@ FEATURES: dict[str, FeatureDef] = {
         category="collaboration",
         enabled=True,
     ),
+    "delegation": FeatureDef(
+        id="delegation",
+        name="Multi-Agent Delegation",
+        description="Hand off between agents (research → coding, etc.), list running agents",
+        category="collaboration",
+        enabled=True,
+    ),
+    "skill_chaining": FeatureDef(
+        id="skill_chaining",
+        name="Skill Chaining",
+        description="Chain skills: research → draft → email in one workflow",
+        category="workflows",
+        enabled=True,
+    ),
     "api_docs": FeatureDef(
         id="api_docs",
         name="Public API Docs",

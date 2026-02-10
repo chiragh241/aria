@@ -240,6 +240,8 @@ class BuiltinSkillsConfig(BaseModel):
     todoist: dict[str, Any] = Field(default_factory=lambda: {"enabled": False, "api_key": ""})
     linear: dict[str, Any] = Field(default_factory=lambda: {"enabled": False, "api_key": ""})
     spotify: dict[str, Any] = Field(default_factory=lambda: {"enabled": False, "client_id": "", "client_secret": ""})
+    context: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    workflow: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
 
 
 class LearnedSkillsConfig(BaseModel):
@@ -288,6 +290,10 @@ class ProactiveConfig(BaseModel):
     suggestions_enabled: bool = True
     context_reminders: bool = True
     time_of_day_awareness: bool = True
+    meeting_prep: bool = True
+    deadline_reminders: bool = True
+    focus_mode: bool = True
+    smart_summaries: bool = True
 
 
 class AgentsConfig(BaseModel):
@@ -299,6 +305,14 @@ class AgentsConfig(BaseModel):
     research_enabled: bool = True
     coding_enabled: bool = True
     data_enabled: bool = True
+
+
+class OneContextConfig(BaseModel):
+    """OneContext integration — unified context for all AI agents."""
+
+    enabled: bool = True
+    working_path: str = "./data/aria_workspace"
+    sync_on_agent_complete: bool = True
 
 
 class Settings(BaseSettings):
@@ -323,6 +337,7 @@ class Settings(BaseSettings):
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    onecontext: OneContextConfig = Field(default_factory=OneContextConfig)
     feature_overrides: dict[str, bool] = Field(default_factory=dict)
 
     # API keys from environment

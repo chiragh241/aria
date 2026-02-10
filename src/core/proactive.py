@@ -1,6 +1,15 @@
-"""Proactive intelligence engine — morning briefings, follow-ups, suggestions."""
+"""Proactive intelligence engine — morning briefings, follow-ups, suggestions.
 
-from datetime import datetime, timezone
+Features:
+- Morning briefing, scheduled reports
+- Meeting prep (before calendar events)
+- Deadline/subscription reminders
+- Focus mode (don't disturb)
+- Smart summaries
+- Follow-up nudges
+"""
+
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from ..features.registry import is_feature_enabled
@@ -30,6 +39,7 @@ class ProactiveEngine:
         self._skill_registry = skill_registry
         self._scheduler = scheduler
         self._subscribed = False
+        self._focus_mode_users: set[str] = set()
 
     async def start(self) -> None:
         """Subscribe to heartbeat and cron events."""
@@ -57,11 +67,21 @@ class ProactiveEngine:
         channel = data.get("channel") or "web"
         context = data.get("context") or {}
 
+        # Focus mode: skip proactive alerts for users in focus mode
+        if getattr(self.settings.proactive, "focus_mode", True) and user_id in self._focus_mode_users:
+            return
+
         # Context reminders (e.g. when in Slack channel, opening repo)
         if is_feature_enabled("context_reminders"):
             reminders = await self._get_context_reminders(user_id, context)
             for msg in reminders:
                 await self._emit_proactive(msg, user_id, channel)
+
+        # Meeting prep (before upcoming calendar events)
+        if getattr(self.settings.proactive, "meeting_prep", True):
+            meeting_prep = await self._get_meeting_prep(user_id)
+            if meeting_prep:
+                await self._emit_proactive(meeting_prep, user_id, channel)
 
         # Proactive suggestions (time-aware)
         if is_feature_enabled("proactive_suggestions"):
@@ -208,6 +228,51 @@ class ProactiveEngine:
                 if due:
                     reminders.append(f"You have {len(due)} reminders pending.")
         return reminders
+
+    def set_focus_mode(self, user_id: str, enabled: bool) -> None:
+        """Enable/disable focus mode (don't disturb) for a user."""
+        if enabled:
+            self._focus_mode_users.add(user_id)
+        else:
+            self._focus_mode_users.discard(user_id)
+        logger.info("Focus mode changed", user_id=user_id, enabled=enabled)
+
+    def is_focus_mode(self, user_id: str) -> bool:
+        """Check if user is in focus mode."""
+        return user_id in self._focus_mode_users
+
+    async def _get_meeting_prep(self, user_id: str) -> str | None:
+        """Generate meeting prep brief for next upcoming meeting."""
+        if not getattr(self.settings.proactive, "meeting_prep", True):
+            return None
+        cal = self._skill_registry.get_skill("calendar") if self._skill_registry else None
+        if not cal or not cal.enabled:
+            return None
+        try:
+            result = await cal.execute("list_events", max_results=5)
+            if not result.success or not result.output:
+                return None
+            out = result.output
+            events = out.get("events", []) if isinstance(out, dict) else (out if isinstance(out, list) else [])
+            now = datetime.now(timezone.utc)
+            for ev in events:
+                start = ev.get("start") or ev.get("start_time")
+                if not start:
+                    continue
+                if isinstance(start, str):
+                    try:
+                        start = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                    except ValueError:
+                        continue
+                if hasattr(start, "tzinfo") and start.tzinfo is None:
+                    start = start.replace(tzinfo=timezone.utc)
+                delta = (start - now).total_seconds()
+                if 0 < delta < 1800:
+                    title = ev.get("summary", "Meeting")
+                    return f"Meeting in ~{int(delta // 60)} min: **{title}**. Want a quick prep brief?"
+        except Exception as e:
+            logger.debug("Meeting prep check failed", error=str(e))
+        return None
 
     async def get_suggestions(self, user_id: str, context: str = "") -> list[str]:
         """Get context-aware suggestions (time-of-day aware)."""

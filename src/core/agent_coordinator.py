@@ -29,6 +29,8 @@ class AgentCoordinator:
         self._event_bus = event_bus
         self._tasks: dict[str, AgentTask] = {}
         self._lock = asyncio.Lock()
+        # Shared context — all agents see the same context (OneContext-style)
+        self._shared_context: dict[str, Any] = {"tasks": [], "findings": [], "artifacts": {}}
 
     def set_skill_registry(self, sr: Any) -> None:
         self._skill_registry = sr
@@ -66,10 +68,19 @@ class AgentCoordinator:
                 "channel": channel,
             }, source="agent_coordinator")
 
+        agent._shared_context = self._shared_context
         try:
             result = await agent.run(task)
             task_obj.status = "completed" if result.success else "failed"
             task_obj.final_result = result.output
+            # Update shared context so next agent sees it
+            self._shared_context["tasks"].append({
+                "task": task,
+                "result": result.output[:500] if result.success else result.error,
+                "success": result.success,
+            })
+            if result.success:
+                self._shared_context["findings"].append(result.output[:1000])
 
             if self._event_bus:
                 await self._event_bus.emit("agent_completed", {
@@ -97,22 +108,23 @@ class AgentCoordinator:
     def _select_agent(self, task: str, agent_type: str | None) -> Any:
         """Select agent based on task or explicit type."""
         task_lower = task.lower()
+        shared = self._shared_context
         if agent_type:
             if agent_type == "research" and self.settings.agents.research_enabled:
-                return ResearchAgent(self._skill_registry, self._llm_router)
+                return ResearchAgent(self._skill_registry, self._llm_router, shared)
             if agent_type == "coding" and self.settings.agents.coding_enabled:
-                return CodingAgent(self._skill_registry, self._llm_router)
+                return CodingAgent(self._skill_registry, self._llm_router, shared)
             if agent_type == "data" and self.settings.agents.data_enabled:
-                return DataAgent(self._skill_registry, self._llm_router)
+                return DataAgent(self._skill_registry, self._llm_router, shared)
 
         if any(kw in task_lower for kw in ["research", "find", "search", "look up"]) and self.settings.agents.research_enabled:
-            return ResearchAgent(self._skill_registry, self._llm_router)
+            return ResearchAgent(self._skill_registry, self._llm_router, shared)
         if any(kw in task_lower for kw in ["code", "script", "write", "program"]) and self.settings.agents.coding_enabled:
-            return CodingAgent(self._skill_registry, self._llm_router)
+            return CodingAgent(self._skill_registry, self._llm_router, shared)
         if any(kw in task_lower for kw in ["analyze", "data", "pattern"]) and self.settings.agents.data_enabled:
-            return DataAgent(self._skill_registry, self._llm_router)
+            return DataAgent(self._skill_registry, self._llm_router, shared)
 
-        return ResearchAgent(self._skill_registry, self._llm_router)
+        return ResearchAgent(self._skill_registry, self._llm_router, shared)
 
     def list_running_agents(self) -> list[dict[str, Any]]:
         """List active agent tasks."""
@@ -299,7 +311,7 @@ class AgentCoordinator:
 
         research_skill = self._skill_registry.get_skill("research") if self._skill_registry else None
         if not research_skill or not research_skill.enabled:
-            agent = ResearchAgent(self._skill_registry, self._llm_router)
+            agent = ResearchAgent(self._skill_registry, self._llm_router, self._shared_context)
             return await self._run_subtasks_via_agent(task, decomp, agent, user_id, channel)
 
         return await self._run_parallel_subtasks(task, decomp, research_skill, user_id, channel)

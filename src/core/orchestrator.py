@@ -283,28 +283,32 @@ class Orchestrator:
 
         return message.id
 
-    async def chat(
+    async def chat_edit(
         self,
         channel: str,
         user_id: str,
-        content: str,
+        message_id: str,
+        new_content: str,
         metadata: dict[str, Any] | None = None,
     ) -> str:
         """
-        Process a chat message synchronously and return the response.
-
-        Unlike process_message which queues, this directly processes
-        and waits for the LLM response, including tool execution.
-
-        Args:
-            channel: Source channel name
-            user_id: User identifier
-            content: Message content
-            metadata: Additional metadata
-
-        Returns:
-            The assistant's response text
+        Edit a message and re-run from that point. Truncates after the edited message,
+        replaces with new content, and regenerates the response.
         """
+        context = await self.context_manager.get_context(
+            channel=channel, user_id=user_id, create_if_missing=False
+        )
+        if not context:
+            return "Conversation not found."
+        idx = context.get_message_index_by_id(message_id)
+        if idx is None:
+            return "Message not found."
+        if idx < len(context.messages) and context.messages[idx].role != "user":
+            return "Can only edit user messages."
+        context.truncate_after_message_index(idx - 1)
+        await self.context_manager.update_context(context)
+        return await self.chat(channel=channel, user_id=user_id, content=new_content, metadata=metadata)
+
         # Log incoming message
         audit_logger.log(
             event="message_received",
@@ -476,7 +480,11 @@ class Orchestrator:
                 # Execute each tool call
                 for tool_call in response.tool_calls:
                     tool_name = tool_call.get("name", "")
-                    tool_args = tool_call.get("arguments", {})
+                    tool_args = dict(tool_call.get("arguments") or {})
+                    if "channel" not in tool_args:
+                        tool_args["channel"] = channel
+                    if "user_id" not in tool_args:
+                        tool_args["user_id"] = user_id
                     tool_id = tool_call.get("id", "")
 
                     logger.debug("Executing tool from chat", tool=tool_name, args=tool_args)
@@ -1029,7 +1037,11 @@ Just ask me what you need help with!"""
 
         for tool_call in tool_calls:
             tool_name = tool_call.get("name", "")
-            tool_args = tool_call.get("arguments", {})
+            tool_args = dict(tool_call.get("arguments") or {})
+            if "channel" not in tool_args:
+                tool_args["channel"] = message.channel
+            if "user_id" not in tool_args:
+                tool_args["user_id"] = message.user_id
             tool_id = tool_call.get("id", "")
 
             logger.debug(
@@ -1404,11 +1416,16 @@ Just ask me what you need help with!"""
                 channel=channel,
             )
 
-            # Execute the tool
+            # Execute the tool (inject channel/user_id for skills)
+            tool_args = dict(tool_call.get("arguments") or {})
+            if "channel" not in tool_args:
+                tool_args["channel"] = message.channel
+            if "user_id" not in tool_args:
+                tool_args["user_id"] = message.user_id
             try:
                 result = await self._execute_tool(
                     tool_call["name"],
-                    tool_call.get("arguments", {}),
+                    tool_args,
                 )
 
                 # Get context and continue conversation

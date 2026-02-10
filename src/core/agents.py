@@ -72,9 +72,10 @@ class BaseAgent(ABC):
 
     max_iterations: int = 10
 
-    def __init__(self, skill_registry: Any, llm_router: Any) -> None:
+    def __init__(self, skill_registry: Any, llm_router: Any, shared_context: dict[str, Any] | None = None) -> None:
         self._skill_registry = skill_registry
         self._llm_router = llm_router
+        self._shared_context = shared_context or {}
 
     @abstractmethod
     async def plan(self, task: str) -> list[AgentStep]:

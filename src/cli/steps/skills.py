@@ -43,6 +43,7 @@ SKILL_GROUPS = {
             "pip": [],
             "system": [],
             "post_install": [],
+            "npm": [],
             "default": True,
         },
         "shell": {
@@ -50,6 +51,7 @@ SKILL_GROUPS = {
             "pip": [],
             "system": [],
             "post_install": [],
+            "npm": [],
             "default": True,
         },
     },
@@ -59,6 +61,7 @@ SKILL_GROUPS = {
             "pip": ["playwright"],
             "system": [],
             "post_install": ["playwright install chromium"],
+            "npm": [],
             "default": True,
         },
     },
@@ -122,12 +125,23 @@ SKILL_GROUPS = {
             "default": False,
         },
     },
+    "Unified Context": {
+        "onecontext": {
+            "label": "OneContext",
+            "pip": [],
+            "system": [],
+            "post_install": [],
+            "npm": ["onecontext-ai"],
+            "default": True,
+        },
+    },
     "Integrations": {
         "notion": {
             "label": "Notion",
             "pip": [],
             "system": [],
             "post_install": [],
+            "npm": [],
             "default": False,
         },
         "todoist": {
@@ -135,6 +149,7 @@ SKILL_GROUPS = {
             "pip": [],
             "system": [],
             "post_install": [],
+            "npm": [],
             "default": False,
         },
         "linear": {
@@ -142,6 +157,7 @@ SKILL_GROUPS = {
             "pip": [],
             "system": [],
             "post_install": [],
+            "npm": [],
             "default": False,
         },
         "spotify": {
@@ -149,6 +165,7 @@ SKILL_GROUPS = {
             "pip": [],
             "system": [],
             "post_install": [],
+            "npm": [],
             "default": False,
         },
     },
@@ -213,18 +230,21 @@ def _check_dependencies(
     all_pip: list[str] = []
     all_system: list[str] = []
     all_post: list[str] = []
+    all_npm: list[str] = []
 
     for skill_id in selected:
         info = _get_skill_info(skill_id)
         if info:
-            all_pip.extend(info["pip"])
-            all_system.extend(info["system"])
-            all_post.extend(info["post_install"])
+            all_pip.extend(info.get("pip", []))
+            all_system.extend(info.get("system", []))
+            all_post.extend(info.get("post_install", []))
+            all_npm.extend(info.get("npm", []))
 
     # Deduplicate
     all_pip = list(dict.fromkeys(all_pip))
     all_system = list(dict.fromkeys(all_system))
     all_post = list(dict.fromkeys(all_post))
+    all_npm = list(dict.fromkeys(all_npm))
 
     if not all_pip and not all_system:
         console.print(f"\n  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] No additional dependencies needed")
@@ -312,6 +332,11 @@ def _check_dependencies(
         console.print(f"\n  [{MUTED}]{ICON_INFO} Post-install commands will run after setup:")
         for cmd in all_post:
             console.print(f"  [{MUTED}]  {ICON_ARROW} {cmd}")
+
+    # NPM packages (e.g. onecontext-ai)
+    if all_npm:
+        state.npm_packages_to_install = all_npm
+        console.print(f"\n  [{MUTED}]{ICON_INFO} npm packages will be installed when selected: {', '.join(all_npm)}")
 
 
 def _install_pip_packages(console: Console, packages: list[str]) -> None:

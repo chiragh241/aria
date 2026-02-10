@@ -213,6 +213,22 @@ class SkillRegistry:
                 {"name": "search_x", "description": "Search X (Twitter)"},
             ],
         },
+        "context_skill": {
+            "description": "Share and load unified agent context (OneContext integration)",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "share_context", "description": "Share current conversation/agent context"},
+                {"name": "load_context", "description": "Load shared context from file or link"},
+                {"name": "get_shared_context", "description": "Get current shared context from agents"},
+            ],
+        },
+        "workflow": {
+            "description": "Chain skills together: research → draft → email, etc.",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "run_chain", "description": "Execute a chain of skills in sequence"},
+            ],
+        },
     }
 
     def __init__(
@@ -273,6 +289,8 @@ class SkillRegistry:
             ("todoist", "TodoistSkill", builtin_config.todoist),
             ("linear", "LinearSkill", builtin_config.linear),
             ("spotify", "SpotifySkill", builtin_config.spotify),
+            ("context_skill", "ContextSkill", builtin_config.context),
+            ("workflow", "WorkflowSkill", builtin_config.workflow),
         ]
 
         for skill_name, class_name, config in skill_classes:
@@ -504,11 +522,12 @@ class SkillRegistry:
         if skill_name in self.BUILTIN_SKILL_META:
             try:
                 import asyncio
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.ensure_future(self._hot_load_skill(skill_name))
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    asyncio.run(self._hot_load_skill(skill_name))
                 else:
-                    loop.run_until_complete(self._hot_load_skill(skill_name))
+                    asyncio.ensure_future(self._hot_load_skill(skill_name))
             except Exception as e:
                 logger.warning("Could not hot-load skill", skill=skill_name, error=str(e))
             return True
@@ -546,6 +565,8 @@ class SkillRegistry:
             "webhook": "WebhookSkill",
             "agent": "AgentSkill",
             "research": "ResearchSkill",
+            "context_skill": "ContextSkill",
+            "workflow": "WorkflowSkill",
         }
         class_name = class_map.get(skill_name)
         if not class_name:

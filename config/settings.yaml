@@ -169,6 +169,10 @@ skills:
     directory: ./data/learned_skills
     auto_test: true
     require_approval: true
+onecontext:
+  enabled: true
+  working_path: ./data/aria_workspace
+  sync_on_agent_complete: true
 proactive:
   enabled: true
   self_healing_enabled: true
@@ -179,6 +183,10 @@ proactive:
   suggestions_enabled: true
   context_reminders: true
   time_of_day_awareness: true
+  meeting_prep: true
+  deadline_reminders: true
+  focus_mode: true
+  smart_summaries: true
 dashboard:
   title: Aria Control Center
   theme: dark
