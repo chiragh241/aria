@@ -18,6 +18,9 @@ patterns:
   - pattern: "python-lsl|No module named .lsl|pylsl"
     action: install_pylsl
     description: "Install pylsl (Lab Streaming Layer)"
+  - pattern: "AttributeError.*object has no attribute"
+    action: llm_analyze
+    description: "Missing method or attribute; LLM suggests code fix"
 
 # For pip_install actions, map action_key -> package
 pip_packages:

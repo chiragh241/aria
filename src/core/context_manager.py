@@ -331,6 +331,7 @@ class ContextManager:
         sections.append("")
         sections.append("## Soul")
         sections.append(f"Your name is {name}. On a user's very first message, introduce yourself briefly and ask what to call them. After that, skip intros.")
+        sections.append("**Your entire point is to do everything the user asks or learn how to do it.** Never refuse a task by saying you \"can't help with that\" or \"that's not something I can assist with.\" If the user wants to start a business, plan an event, learn something, or do anything else — use your tools (browser, shell, research, create_skill) to figure it out and help. Refusing is not an option.")
         sections.append("Be genuinely helpful, not performatively helpful. Skip the \"Great question!\" and \"I'd be happy to help!\" filler — just help.")
         sections.append("Have opinions. You're allowed to prefer things, find stuff amusing, or push back. An assistant with no personality is a search engine with extra steps.")
         sections.append("Be resourceful before asking. Check context, use your tools, try to figure it out. Come back with answers, not questions.")
@@ -388,6 +389,7 @@ class ContextManager:
         sections.append("**Prefer free ways:** For bookings, reservations, or any task the user asks you to do, always try a free approach first: free APIs, scraping (browser.extract_text / navigate + parse), or browser automation (browser.navigate, fill forms, take actions). Do not suggest or use paid services when a free API, public website, or automation can achieve the same. Search for \"free API for X\" or use the browser to do it directly on the provider's site.")
         sections.append("")
         sections.append("**Rules:**")
+        sections.append("- NEVER say \"I can't help with that,\" \"that's not something I can assist with,\" or \"I'm not able to do that\" for task requests (businesses, projects, learning, planning, etc.). Your job is to figure out how — use browser.search, research, create_skill, shell. Refusing is a last resort only when you truly lack the means (e.g. no API key and no free alternative).")
         sections.append("- Never respond with \"I don't have that capability\" or \"I can't do that\" when you have shell, browser, and filesystem. Find a way.")
         sections.append("- If a tool or script fails (e.g. ModuleNotFoundError, command not found), install the dependency or fix the command and retry before giving up.")
         sections.append("- For one-off tasks you can do it entirely via shell + browser; for recurring or structured tasks use create_skill so it's available next time.")
@@ -462,6 +464,28 @@ class ContextManager:
 
             if not create_if_missing:
                 return None
+
+            # Try loading from disk first (handles multi-worker and restarts)
+            path = self._get_persist_path(key)
+            if path.exists():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    context = ConversationContext.from_dict(data)
+                    # Refresh system prompt
+                    new_prompt = self._system_prompt.replace(
+                        "{{current_date}}", datetime.now().strftime("%Y-%m-%d")
+                    ).replace("{{user_id}}", context.user_id).replace("{{channel}}", context.channel)
+                    for i, msg in enumerate(context.messages):
+                        if msg.role == "system":
+                            context.messages[i] = LLMMessage(role="system", content=new_prompt)
+                            break
+                    if topic_id and not context.topic_id:
+                        context.topic_id = topic_id
+                    self._contexts[key] = context
+                    logger.debug("Loaded context from disk", context_id=context.id, channel=channel, user_id=user_id)
+                    return context
+                except Exception as e:
+                    logger.warning("Failed to load context from disk, creating new", key=key, error=str(e))
 
             # Create new context
             context = ConversationContext(

@@ -67,6 +67,9 @@ class SecurityGuardian:
         # Approval tracking
         self._pending_requests: dict[str, ApprovalRequest] = {}
         self._approval_futures: dict[str, asyncio.Future[ApprovalResult]] = {}
+        # Outcomes after apply (e.g. code_edit: applied/failed per file) for UI status
+        self._approval_outcomes: dict[str, dict[str, Any]] = {}
+        self._max_outcomes = 100
 
         # Channel references for sending approval requests
         self._channels: dict[str, "BaseChannel"] = {}
@@ -293,6 +296,15 @@ class SecurityGuardian:
                 timeout=request.timeout,
             )
 
+            # Web: if no WebSocket connections, leave request pending for REST (dashboard)
+            # so the user can open Approvals and click Approve/Deny
+            if channel_name == "web" and result.get("error") == "No active connections":
+                logger.info(
+                    "Approval request pending for web dashboard (no WebSocket); user can respond via Approvals page",
+                    request_id=request.id,
+                )
+                return
+
             # Process result
             await self.handle_approval_response(
                 request_id=request.id,
@@ -367,6 +379,20 @@ class SecurityGuardian:
             self._approval_futures.pop(request_id, None)
 
         return True
+
+    def set_approval_outcome(self, request_id: str, outcome: dict[str, Any]) -> None:
+        """Store outcome of an approved action (e.g. code_edit apply result) for UI."""
+        self._approval_outcomes[request_id] = outcome
+        while len(self._approval_outcomes) > self._max_outcomes:
+            self._approval_outcomes.pop(next(iter(self._approval_outcomes)), None)
+
+    def get_approval_outcome(self, request_id: str) -> dict[str, Any] | None:
+        """Get stored outcome for a request, if any."""
+        return self._approval_outcomes.get(request_id)
+
+    def pop_approval_outcome(self, request_id: str) -> dict[str, Any] | None:
+        """Get and remove outcome (so UI can show once)."""
+        return self._approval_outcomes.pop(request_id, None)
 
     async def _notify_user(
         self,

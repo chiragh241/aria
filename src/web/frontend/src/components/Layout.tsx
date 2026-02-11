@@ -15,7 +15,7 @@ import {
   Moon,
   Sparkles,
 } from 'lucide-react';
-import { systemApi } from '../services/api';
+import { systemApi, approvalsApi } from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
@@ -56,7 +56,22 @@ export default function Layout() {
     retry: 1,
   });
 
+  const { data: approvals } = useQuery({
+    queryKey: ['approvals'],
+    queryFn: async () => {
+      try {
+        const res = await approvalsApi.getPending();
+        return (res.data.approvals ?? []) as { id: string }[];
+      } catch {
+        return [];
+      }
+    },
+    refetchInterval: 10000,
+    retry: 1,
+  });
+
   const isHealthy = health?.status === 'healthy';
+  const pendingApprovalsCount = approvals?.length ?? 0;
 
   const handleLogout = () => {
     logout();
@@ -93,6 +108,7 @@ export default function Layout() {
           {navItems.map((item) => {
             const isActive = location.pathname === item.path ||
               (item.path === '/chat' && (location.pathname === '/' || location.pathname === '/chat'));
+            const showApprovalBadge = item.path === '/approvals' && pendingApprovalsCount > 0;
             return (
               <NavLink
                 key={item.path}
@@ -105,7 +121,12 @@ export default function Layout() {
               >
                 <item.icon className={`w-[18px] h-[18px] ${isActive ? 'text-blue-400' : ''}`} />
                 <span>{item.label}</span>
-                {isActive && (
+                {showApprovalBadge && (
+                  <span className="ml-auto min-w-[20px] h-5 px-1.5 flex items-center justify-center rounded-full bg-amber-500/20 text-amber-400 text-[11px] font-semibold">
+                    {pendingApprovalsCount}
+                  </span>
+                )}
+                {isActive && !showApprovalBadge && (
                   <div className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-400" />
                 )}
               </NavLink>

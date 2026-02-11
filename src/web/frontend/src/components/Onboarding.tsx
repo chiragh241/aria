@@ -93,7 +93,7 @@ export default function Onboarding() {
             <Bot className="w-7 h-7 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-theme-primary">Welcome to Aria</h1>
-          <p className="text-theme-secondary mt-1">Set up your assistant in a few steps</p>
+          <p className="text-theme-secondary mt-1">Set up your assistant in a few steps. You can configure LLM providers (Ollama, Claude, Gemini, OpenRouter, NVIDIA) and choose which model to use in Settings → LLM.</p>
           <div className="flex justify-center gap-2 mt-4">
             {[1, 2].map((s) => (
               <div

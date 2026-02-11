@@ -401,13 +401,21 @@ def create_app(
     async def respond_to_approval(request: ApprovalRequest, user_id: str = Depends(get_current_user)):
         if not app.state.security_guardian:
             raise HTTPException(status_code=503, detail="Security guardian not available")
-        result = await app.state.security_guardian.handle_approval_response(
+        import asyncio
+        processed = await app.state.security_guardian.handle_approval_response(
             request_id=request.approval_id,
             approved=request.approved,
             approved_by=user_id,
             channel="web",
         )
-        return {"processed": result}
+        outcome = None
+        if processed and request.approved:
+            for _ in range(30):
+                await asyncio.sleep(0.5)
+                outcome = app.state.security_guardian.pop_approval_outcome(request.approval_id)
+                if outcome is not None:
+                    break
+        return {"processed": processed, "outcome": outcome}
 
     # -- Skills --
 
@@ -499,6 +507,15 @@ def create_app(
                 "ollama_model": cfg.get("llm", {}).get("local", {}).get("model", "llama3.2:latest"),
                 "ollama_base_url": cfg.get("llm", {}).get("local", {}).get("base_url", "http://localhost:11434"),
                 "cloud_enabled": cfg.get("llm", {}).get("cloud", {}).get("enabled", False),
+                "gemini_enabled": cfg.get("llm", {}).get("gemini", {}).get("enabled", False),
+                "gemini_model": cfg.get("llm", {}).get("gemini", {}).get("model", "gemini-2.0-flash"),
+                "gemini_key_set": bool(env.get("GOOGLE_API_KEY")),
+                "openrouter_enabled": cfg.get("llm", {}).get("openrouter", {}).get("enabled", False),
+                "openrouter_model": cfg.get("llm", {}).get("openrouter", {}).get("model", "anthropic/claude-3.5-sonnet"),
+                "openrouter_key_set": bool(env.get("OPENROUTER_API_KEY")),
+                "nvidia_enabled": cfg.get("llm", {}).get("nvidia", {}).get("enabled", False),
+                "nvidia_model": cfg.get("llm", {}).get("nvidia", {}).get("model", "moonshotai/kimi-k2.5"),
+                "nvidia_key_set": bool(env.get("NVIDIA_API_KEY")),
             },
             "channels": {
                 "web_enabled": True,
@@ -557,6 +574,12 @@ def create_app(
             cfg["llm"]["local"] = {}
         if "cloud" not in cfg["llm"]:
             cfg["llm"]["cloud"] = {}
+        if "gemini" not in cfg["llm"]:
+            cfg["llm"]["gemini"] = {}
+        if "openrouter" not in cfg["llm"]:
+            cfg["llm"]["openrouter"] = {}
+        if "nvidia" not in cfg["llm"]:
+            cfg["llm"]["nvidia"] = {}
 
         if "ollama_enabled" in d:
             cfg["llm"]["local"]["enabled"] = d["ollama_enabled"]
@@ -570,6 +593,24 @@ def create_app(
             cfg["llm"]["cloud"]["model"] = d["anthropic_model"]
         if "anthropic_api_key" in d:
             _set_env_value("ANTHROPIC_API_KEY", d["anthropic_api_key"])
+        if "gemini_enabled" in d:
+            cfg["llm"]["gemini"]["enabled"] = d["gemini_enabled"]
+        if "gemini_model" in d:
+            cfg["llm"]["gemini"]["model"] = d["gemini_model"]
+        if "google_api_key" in d and d["google_api_key"]:
+            _set_env_value("GOOGLE_API_KEY", d["google_api_key"])
+        if "openrouter_enabled" in d:
+            cfg["llm"]["openrouter"]["enabled"] = d["openrouter_enabled"]
+        if "openrouter_model" in d:
+            cfg["llm"]["openrouter"]["model"] = d["openrouter_model"]
+        if "openrouter_api_key" in d and d["openrouter_api_key"]:
+            _set_env_value("OPENROUTER_API_KEY", d["openrouter_api_key"])
+        if "nvidia_enabled" in d:
+            cfg["llm"]["nvidia"]["enabled"] = d["nvidia_enabled"]
+        if "nvidia_model" in d:
+            cfg["llm"]["nvidia"]["model"] = d["nvidia_model"]
+        if "nvidia_api_key" in d and d["nvidia_api_key"]:
+            _set_env_value("NVIDIA_API_KEY", d["nvidia_api_key"])
 
         _save_yaml_config(cfg)
         return {"updated": True, "restart_required": True}
@@ -769,6 +810,18 @@ def create_app(
             valid, msg = SystemDetector.validate_brave_key(body.key_value)
             return {"valid": valid, "message": msg}
 
+        if body.key_type == "gemini":
+            valid, msg = SystemDetector.validate_google_key(body.key_value)
+            return {"valid": valid, "message": msg}
+
+        if body.key_type == "openrouter":
+            valid, msg = SystemDetector.validate_openrouter_key(body.key_value)
+            return {"valid": valid, "message": msg}
+
+        if body.key_type == "nvidia":
+            valid, msg = SystemDetector.validate_nvidia_key(body.key_value)
+            return {"valid": valid, "message": msg}
+
         if body.key_type == "slack_bot":
             app_token = (body.extra or {}).get("app_token", "")
             valid, msg = SystemDetector.check_slack_credentials(body.key_value, app_token)
@@ -793,6 +846,9 @@ def create_app(
             "playwright": {"installed": results.playwright.installed, "has_chromium": results.playwright.extra.get("has_chromium", False)},
             "node": {"installed": results.node.installed, "version": results.node.version},
             "anthropic_key": {"found": results.anthropic_key.installed, "source": results.anthropic_key.extra.get("source", "")},
+            "google_key": {"found": results.google_key.installed, "source": results.google_key.extra.get("source", "")},
+            "openrouter_key": {"found": results.openrouter_key.installed, "source": results.openrouter_key.extra.get("source", "")},
+            "nvidia_key": {"found": results.nvidia_key.installed, "source": results.nvidia_key.extra.get("source", "")},
             "brave_key": {"found": results.brave_key.installed},
         }
 

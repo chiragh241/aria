@@ -1,6 +1,7 @@
 """LLM Router for intelligent routing between local and cloud models."""
 
 import asyncio
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -21,7 +22,9 @@ class LLMProvider(str, Enum):
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
-
+    GEMINI = "gemini"
+    OPENROUTER = "openrouter"
+    NVIDIA = "nvidia"
 
 class TaskComplexity(str, Enum):
     """Task complexity levels for routing decisions."""
@@ -427,6 +430,535 @@ class AnthropicClient(BaseLLMClient):
             return False
 
 
+class GeminiClient(BaseLLMClient):
+    """Client for Google Gemini (Nano, Flash, Pro, etc.) via GOOGLE_API_KEY."""
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gemini-2.0-flash",
+        max_tokens: int = 4096,
+        timeout: int = 120,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+        self._model_instance: Any = None
+
+    def _get_model(self) -> Any:
+        """Get or create the Gemini model instance."""
+        if self._model_instance is None:
+            import google.generativeai as genai
+
+            genai.configure(api_key=self.api_key)
+            self._model_instance = genai.GenerativeModel(
+                self.model,
+                generation_config={
+                    "max_output_tokens": self.max_tokens,
+                    "temperature": 0.7,
+                },
+            )
+        return self._model_instance
+
+    def _messages_to_content(self, messages: list[LLMMessage]) -> list[dict[str, Any]]:
+        """Convert LLMMessages to Gemini chat format (roles + parts)."""
+        contents = []
+        for m in messages:
+            role = "user" if m.role == "user" else "model" if m.role == "assistant" else "user"
+            if m.role == "system":
+                contents.append({"role": "user", "parts": [f"System: {m.content}"]})
+                contents.append({"role": "model", "parts": ["Understood."]})
+            else:
+                parts: list[Any] = [m.content or ""]
+                if m.role == "assistant" and m.tool_calls:
+                    for tc in m.tool_calls:
+                        args = tc.get("arguments", {})
+                        if isinstance(args, str):
+                            import json
+                            try:
+                                args = json.loads(args)
+                            except Exception:
+                                args = {}
+                        parts.append({
+                            "function_call": {
+                                "name": tc.get("name", ""),
+                                "args": args,
+                            },
+                        })
+                contents.append({"role": role, "parts": parts})
+        return contents
+
+    def _tools_to_gemini(self, tools: list[Tool]) -> list[Any]:
+        """Convert Tool list to Gemini function declarations."""
+        if not tools:
+            return []
+        import google.generativeai as genai
+
+        decls = []
+        for t in tools:
+            decls.append({
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.parameters,
+            })
+        try:
+            return [genai.types.Tool(function_declarations=decls)]
+        except AttributeError:
+            return [genai.protos.Tool(function_declarations=decls)]
+
+    async def generate(
+        self,
+        messages: list[LLMMessage],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Generate a response using Gemini."""
+        model = self._get_model()
+        contents = self._messages_to_content(messages)
+        generation_config = {
+            "max_output_tokens": max_tokens or self.max_tokens,
+            "temperature": temperature,
+        }
+        kwargs_sync: dict[str, Any] = {
+            "contents": contents,
+            "generation_config": generation_config,
+        }
+        if tools:
+            kwargs_sync["tools"] = self._tools_to_gemini(tools)
+
+        def _run() -> Any:
+            return model.generate_content(**kwargs_sync)
+
+        response = await asyncio.to_thread(_run)
+        text = ""
+        tool_calls = []
+        if response.candidates:
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, "text") and part.text:
+                    text += part.text
+                if hasattr(part, "function_call") and part.function_call:
+                    fc = part.function_call
+                    tool_calls.append({
+                        "id": getattr(fc, "id", f"call_{len(tool_calls)}"),
+                        "name": getattr(fc, "name", ""),
+                        "arguments": getattr(fc, "args", {}) or {},
+                    })
+        usage = {}
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            usage = {
+                "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0),
+                "completion_tokens": getattr(response.usage_metadata, "candidates_token_count", 0),
+            }
+        return LLMResponse(
+            content=text,
+            model=self.model,
+            provider=LLMProvider.GEMINI,
+            usage=usage,
+            tool_calls=tool_calls if tool_calls else None,
+            finish_reason=getattr(response.candidates[0], "finish_reason", None) if response.candidates else None,
+            raw_response=response,
+        )
+
+    async def generate_stream(
+        self,
+        messages: list[LLMMessage],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Generate a streaming response using Gemini."""
+        model = self._get_model()
+        contents = self._messages_to_content(messages)
+        generation_config = {
+            "max_output_tokens": max_tokens or self.max_tokens,
+            "temperature": temperature,
+        }
+        kwargs_sync = {"contents": contents, "generation_config": generation_config, "stream": True}
+        if tools:
+            kwargs_sync["tools"] = self._tools_to_gemini(tools)
+
+        def _stream() -> Any:
+            return model.generate_content(**kwargs_sync)
+
+        stream = await asyncio.to_thread(_stream)
+        for chunk in stream:
+            if chunk.text:
+                yield chunk.text
+
+    async def health_check(self) -> bool:
+        """Check if Gemini API is accessible."""
+        try:
+            model = self._get_model()
+            result = await asyncio.to_thread(
+                model.generate_content,
+                "Hi",
+                generation_config={"max_output_tokens": 5},
+            )
+            return result is not None and (not result.candidates or len(result.candidates) > 0)
+        except Exception:
+            return False
+
+
+class OpenRouterClient(BaseLLMClient):
+    """Client for OpenRouter (400+ models via one API). OpenAI-compatible."""
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "anthropic/claude-3.5-sonnet",
+        max_tokens: int = 4096,
+        timeout: int = 120,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+        self._client: Any = None
+
+    def _get_client(self) -> Any:
+        if self._client is None:
+            from openai import AsyncOpenAI
+
+            self._client = AsyncOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=self.api_key,
+                timeout=self.timeout,
+            )
+        return self._client
+
+    def _messages_to_openai(self, messages: list[LLMMessage]) -> list[dict[str, Any]]:
+        out = []
+        for m in messages:
+            role = m.role if m.role in ("user", "assistant", "system") else "user"
+            msg: dict[str, Any] = {"role": role, "content": m.content or ""}
+            if m.role == "assistant" and m.tool_calls:
+                msg["tool_calls"] = [
+                    {
+                        "id": tc.get("id", f"call_{i}"),
+                        "type": "function",
+                        "function": {
+                            "name": tc.get("name", ""),
+                            "arguments": (
+                                json.dumps(tc["arguments"])
+                                if isinstance(tc.get("arguments"), dict)
+                                else str(tc.get("arguments", "{}"))
+                            ),
+                        },
+                    }
+                    for i, tc in enumerate(m.tool_calls)
+                ]
+            out.append(msg)
+        return out
+
+    def _tools_to_openai(self, tools: list[Tool]) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                },
+            }
+            for t in tools
+        ]
+
+    async def generate(
+        self,
+        messages: list[LLMMessage],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Generate using OpenRouter (OpenAI-compatible API)."""
+        client = self._get_client()
+        openai_messages = self._messages_to_openai(messages)
+        kwargs_call: dict[str, Any] = {
+            "model": self.model,
+            "messages": openai_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens or self.max_tokens,
+        }
+        if tools:
+            kwargs_call["tools"] = self._tools_to_openai(tools)
+            kwargs_call["tool_choice"] = "auto"
+
+        response = await client.chat.completions.create(**kwargs_call)
+        choice = response.choices[0] if response.choices else None
+        if not choice:
+            return LLMResponse(
+                content="",
+                model=self.model,
+                provider=LLMProvider.OPENROUTER,
+                usage={},
+            )
+        msg = choice.message
+        content = msg.content or ""
+        tool_calls = None
+        if getattr(msg, "tool_calls", None):
+            tool_calls = []
+            for tc in msg.tool_calls:
+                args = getattr(tc.function, "arguments", "{}")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {}
+                tool_calls.append({
+                    "id": getattr(tc, "id", ""),
+                    "name": getattr(tc.function, "name", ""),
+                    "arguments": args,
+                })
+        usage = {}
+        if getattr(response, "usage", None):
+            u = response.usage
+            usage = {
+                "prompt_tokens": getattr(u, "prompt_tokens", 0),
+                "completion_tokens": getattr(u, "completion_tokens", 0),
+            }
+        return LLMResponse(
+            content=content,
+            model=self.model,
+            provider=LLMProvider.OPENROUTER,
+            usage=usage,
+            tool_calls=tool_calls,
+            finish_reason=getattr(choice, "finish_reason", None),
+            raw_response=response,
+        )
+
+    async def generate_stream(
+        self,
+        messages: list[LLMMessage],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Stream from OpenRouter."""
+        client = self._get_client()
+        openai_messages = self._messages_to_openai(messages)
+        kwargs_call: dict[str, Any] = {
+            "model": self.model,
+            "messages": openai_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens or self.max_tokens,
+            "stream": True,
+        }
+        if tools:
+            kwargs_call["tools"] = self._tools_to_openai(tools)
+            kwargs_call["tool_choice"] = "auto"
+
+        stream = await client.chat.completions.create(**kwargs_call)
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+    async def health_check(self) -> bool:
+        """Check if OpenRouter API is accessible."""
+        try:
+            client = self._get_client()
+            await client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=5,
+            )
+            return True
+        except Exception:
+            return False
+
+
+class NvidiaClient(BaseLLMClient):
+    """Client for NVIDIA NIM (integrate.api.nvidia.com). OpenAI-compatible."""
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "moonshotai/kimi-k2.5",
+        max_tokens: int = 16384,
+        timeout: int = 120,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+        self._client: Any = None
+
+    def _get_client(self) -> Any:
+        if self._client is None:
+            from openai import AsyncOpenAI
+
+            self._client = AsyncOpenAI(
+                base_url="https://integrate.api.nvidia.com/v1",
+                api_key=self.api_key,
+                timeout=self.timeout,
+            )
+        return self._client
+
+    def _messages_to_openai(self, messages: list[LLMMessage]) -> list[dict[str, Any]]:
+        out = []
+        for m in messages:
+            role = m.role if m.role in ("user", "assistant", "system") else "user"
+            msg: dict[str, Any] = {"role": role, "content": m.content or ""}
+            if m.role == "assistant" and m.tool_calls:
+                msg["tool_calls"] = [
+                    {
+                        "id": tc.get("id", f"call_{i}"),
+                        "type": "function",
+                        "function": {
+                            "name": tc.get("name", ""),
+                            "arguments": (
+                                json.dumps(tc["arguments"])
+                                if isinstance(tc.get("arguments"), dict)
+                                else str(tc.get("arguments", "{}"))
+                            ),
+                        },
+                    }
+                    for i, tc in enumerate(m.tool_calls)
+                ]
+            out.append(msg)
+        return out
+
+    def _tools_to_openai(self, tools: list[Tool]) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                },
+            }
+            for t in tools
+        ]
+
+    def _extra_body(self) -> dict[str, Any]:
+        """Optional body for thinking models (e.g. kimi-k2.5)."""
+        return {"chat_template_kwargs": {"thinking": True}}
+
+    async def generate(
+        self,
+        messages: list[LLMMessage],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Generate using NVIDIA NIM (OpenAI-compatible API)."""
+        client = self._get_client()
+        openai_messages = self._messages_to_openai(messages)
+        kwargs_call: dict[str, Any] = {
+            "model": self.model,
+            "messages": openai_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens or self.max_tokens,
+            "extra_body": self._extra_body(),
+        }
+        if "thinking" in self.model.lower():
+            kwargs_call["top_p"] = 0.9
+        if tools:
+            kwargs_call["tools"] = self._tools_to_openai(tools)
+            kwargs_call["tool_choice"] = "auto"
+
+        response = await client.chat.completions.create(**kwargs_call)
+        choice = response.choices[0] if response.choices else None
+        if not choice:
+            return LLMResponse(
+                content="",
+                model=self.model,
+                provider=LLMProvider.NVIDIA,
+                usage={},
+            )
+        msg = choice.message
+        content = msg.content or ""
+        tool_calls = None
+        if getattr(msg, "tool_calls", None):
+            tool_calls = []
+            for tc in msg.tool_calls:
+                args = getattr(tc.function, "arguments", "{}")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {}
+                tool_calls.append({
+                    "id": getattr(tc, "id", ""),
+                    "name": getattr(tc.function, "name", ""),
+                    "arguments": args,
+                })
+        usage = {}
+        if getattr(response, "usage", None):
+            u = response.usage
+            usage = {
+                "prompt_tokens": getattr(u, "prompt_tokens", 0),
+                "completion_tokens": getattr(u, "completion_tokens", 0),
+            }
+        return LLMResponse(
+            content=content,
+            model=self.model,
+            provider=LLMProvider.NVIDIA,
+            usage=usage,
+            tool_calls=tool_calls,
+            finish_reason=getattr(choice, "finish_reason", None),
+            raw_response=response,
+        )
+
+    async def generate_stream(
+        self,
+        messages: list[LLMMessage],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Stream from NVIDIA NIM."""
+        client = self._get_client()
+        openai_messages = self._messages_to_openai(messages)
+        kwargs_call: dict[str, Any] = {
+            "model": self.model,
+            "messages": openai_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens or self.max_tokens,
+            "stream": True,
+            "extra_body": self._extra_body(),
+        }
+        if "thinking" in self.model.lower():
+            kwargs_call["top_p"] = 0.9
+        if tools:
+            kwargs_call["tools"] = self._tools_to_openai(tools)
+            kwargs_call["tool_choice"] = "auto"
+
+        stream = await client.chat.completions.create(**kwargs_call)
+        async for chunk in stream:
+            if not getattr(chunk, "choices", None) or not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            # Thinking/reasoning models (e.g. kimi-k2-thinking) stream reasoning_content then content
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                yield reasoning
+            if getattr(delta, "content", None):
+                yield delta.content
+
+    async def health_check(self) -> bool:
+        """Check if NVIDIA NIM API is accessible."""
+        try:
+            client = self._get_client()
+            await client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=5,
+                extra_body=self._extra_body(),
+            )
+            return True
+        except Exception:
+            return False
+
+
 class LLMRouter:
     """
     Intelligent router that decides whether to use local or cloud LLM.
@@ -442,8 +974,14 @@ class LLMRouter:
         self.settings = get_settings()
         self._local_client: OllamaClient | None = None
         self._cloud_client: AnthropicClient | None = None
+        self._gemini_client: GeminiClient | None = None
+        self._openrouter_client: OpenRouterClient | None = None
+        self._nvidia_client: NvidiaClient | None = None
         self._local_available: bool | None = None
         self._cloud_available: bool | None = None
+        self._gemini_available: bool | None = None
+        self._openrouter_available: bool | None = None
+        self._nvidia_available: bool | None = None
 
         # Token counter for routing decisions
         try:
@@ -461,13 +999,37 @@ class LLMRouter:
             self._local_available = False
             logger.info("Local LLM disabled")
 
-        # Check cloud availability
+        # Check cloud (Anthropic) availability
         if self.cloud_client:
             self._cloud_available = await self.cloud_client.health_check()
             logger.info("Cloud LLM", available=self._cloud_available, model=self.settings.llm.cloud.model)
         else:
             self._cloud_available = False
             logger.info("Cloud LLM disabled or no API key")
+
+        # Check Gemini availability
+        if self.gemini_client:
+            self._gemini_available = await self.gemini_client.health_check()
+            logger.info("Gemini LLM", available=self._gemini_available, model=self.settings.llm.gemini.model)
+        else:
+            self._gemini_available = False
+            logger.info("Gemini LLM disabled or no API key")
+
+        # Check OpenRouter availability
+        if self.openrouter_client:
+            self._openrouter_available = await self.openrouter_client.health_check()
+            logger.info("OpenRouter LLM", available=self._openrouter_available, model=self.settings.llm.openrouter.model)
+        else:
+            self._openrouter_available = False
+            logger.info("OpenRouter LLM disabled or no API key")
+
+        # Check NVIDIA NIM availability
+        if self.nvidia_client:
+            self._nvidia_available = await self.nvidia_client.health_check()
+            logger.info("NVIDIA LLM", available=self._nvidia_available, model=self.settings.llm.nvidia.model)
+        else:
+            self._nvidia_available = False
+            logger.info("NVIDIA LLM disabled or no API key")
 
     @property
     def local_client(self) -> OllamaClient | None:
@@ -485,7 +1047,7 @@ class LLMRouter:
 
     @property
     def cloud_client(self) -> AnthropicClient | None:
-        """Get or create the cloud LLM client."""
+        """Get or create the cloud (Anthropic) LLM client."""
         if self._cloud_client is None and self.settings.llm.cloud.enabled:
             api_key = self.settings.anthropic_api_key
             if api_key:
@@ -496,6 +1058,48 @@ class LLMRouter:
                     timeout=self.settings.llm.cloud.timeout,
                 )
         return self._cloud_client
+
+    @property
+    def gemini_client(self) -> GeminiClient | None:
+        """Get or create the Gemini LLM client."""
+        if self._gemini_client is None and self.settings.llm.gemini.enabled:
+            api_key = self.settings.google_api_key
+            if api_key:
+                self._gemini_client = GeminiClient(
+                    api_key=api_key,
+                    model=self.settings.llm.gemini.model,
+                    max_tokens=self.settings.llm.gemini.max_tokens,
+                    timeout=self.settings.llm.gemini.timeout,
+                )
+        return self._gemini_client
+
+    @property
+    def openrouter_client(self) -> OpenRouterClient | None:
+        """Get or create the OpenRouter LLM client."""
+        if self._openrouter_client is None and self.settings.llm.openrouter.enabled:
+            api_key = self.settings.openrouter_api_key
+            if api_key:
+                self._openrouter_client = OpenRouterClient(
+                    api_key=api_key,
+                    model=self.settings.llm.openrouter.model,
+                    max_tokens=self.settings.llm.openrouter.max_tokens,
+                    timeout=self.settings.llm.openrouter.timeout,
+                )
+        return self._openrouter_client
+
+    @property
+    def nvidia_client(self) -> NvidiaClient | None:
+        """Get or create the NVIDIA NIM LLM client."""
+        if self._nvidia_client is None and self.settings.llm.nvidia.enabled:
+            api_key = self.settings.nvidia_api_key
+            if api_key:
+                self._nvidia_client = NvidiaClient(
+                    api_key=api_key,
+                    model=self.settings.llm.nvidia.model,
+                    max_tokens=self.settings.llm.nvidia.max_tokens,
+                    timeout=self.settings.llm.nvidia.timeout,
+                )
+        return self._nvidia_client
 
     def count_tokens(self, text: str) -> int:
         """Count the number of tokens in a text string."""
@@ -564,6 +1168,18 @@ class LLMRouter:
             self._cloud_available = await self.cloud_client.health_check()
             results["cloud"] = self._cloud_available
 
+        if self.gemini_client:
+            self._gemini_available = await self.gemini_client.health_check()
+            results["gemini"] = self._gemini_available
+
+        if self.openrouter_client:
+            self._openrouter_available = await self.openrouter_client.health_check()
+            results["openrouter"] = self._openrouter_available
+
+        if self.nvidia_client:
+            self._nvidia_available = await self.nvidia_client.health_check()
+            results["nvidia"] = self._nvidia_available
+
         return results
 
     async def _recheck_providers(self) -> None:
@@ -582,6 +1198,21 @@ class LLMRouter:
             self._cloud_available = await self.cloud_client.health_check()
             if self._cloud_available:
                 logger.info("Cloud LLM became available on recheck")
+
+        if self._gemini_available is False and self.gemini_client:
+            self._gemini_available = await self.gemini_client.health_check()
+            if self._gemini_available:
+                logger.info("Gemini LLM became available on recheck")
+
+        if self._openrouter_available is False and self.openrouter_client:
+            self._openrouter_available = await self.openrouter_client.health_check()
+            if self._openrouter_available:
+                logger.info("OpenRouter LLM became available on recheck")
+
+        if self._nvidia_available is False and self.nvidia_client:
+            self._nvidia_available = await self.nvidia_client.health_check()
+            if self._nvidia_available:
+                logger.info("NVIDIA LLM became available on recheck")
 
     def select_provider(
         self,
@@ -609,6 +1240,12 @@ class LLMRouter:
 
         # If tools are required and local doesn't support them well, use cloud
         if require_tools and complexity != TaskComplexity.SIMPLE:
+            if self.gemini_client and self._gemini_available is not False:
+                return self.gemini_client, LLMProvider.GEMINI
+            if self.openrouter_client and self._openrouter_available is not False:
+                return self.openrouter_client, LLMProvider.OPENROUTER
+            if self.nvidia_client and self._nvidia_available is not False:
+                return self.nvidia_client, LLMProvider.NVIDIA
             if self.cloud_client and self._cloud_available is not False:
                 return self.cloud_client, LLMProvider.ANTHROPIC
 
@@ -617,12 +1254,24 @@ class LLMRouter:
             if self.local_client and self._local_available is not False:
                 return self.local_client, LLMProvider.OLLAMA
 
-        # Complex tasks go to cloud
+        # Complex tasks: prefer Gemini, then OpenRouter, then NVIDIA, then Anthropic, then local
         if complexity == TaskComplexity.COMPLEX:
+            if self.gemini_client and self._gemini_available is not False:
+                return self.gemini_client, LLMProvider.GEMINI
+            if self.openrouter_client and self._openrouter_available is not False:
+                return self.openrouter_client, LLMProvider.OPENROUTER
+            if self.nvidia_client and self._nvidia_available is not False:
+                return self.nvidia_client, LLMProvider.NVIDIA
             if self.cloud_client and self._cloud_available is not False:
                 return self.cloud_client, LLMProvider.ANTHROPIC
 
-        # Moderate complexity: prefer cloud but fall back to local
+        # Moderate: prefer Gemini, then OpenRouter, then NVIDIA, then Anthropic, then local
+        if self.gemini_client and self._gemini_available is not False:
+            return self.gemini_client, LLMProvider.GEMINI
+        if self.openrouter_client and self._openrouter_available is not False:
+            return self.openrouter_client, LLMProvider.OPENROUTER
+        if self.nvidia_client and self._nvidia_available is not False:
+            return self.nvidia_client, LLMProvider.NVIDIA
         if self.cloud_client and self._cloud_available is not False:
             return self.cloud_client, LLMProvider.ANTHROPIC
 
@@ -702,21 +1351,45 @@ class LLMRouter:
             )
             return response
         except Exception as e:
-            # Try fallback if configured
-            if (
-                self.settings.llm.routing.fallback_to_cloud
-                and provider == LLMProvider.OLLAMA
-                and self.cloud_client
-            ):
-                logger.warning("Local LLM failed, falling back to cloud", error=str(e))
+            # Try fallback if configured (Gemini, OpenRouter, then Anthropic)
+            if self.settings.llm.routing.fallback_to_cloud and provider == LLMProvider.OLLAMA:
                 self._local_available = False
-                return await self.cloud_client.generate(
-                    messages=messages,
-                    tools=tools,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    **kwargs,
-                )
+                if self.gemini_client and self._gemini_available is not False:
+                    logger.warning("Local LLM failed, falling back to Gemini", error=str(e))
+                    return await self.gemini_client.generate(
+                        messages=messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs,
+                    )
+                if self.openrouter_client and self._openrouter_available is not False:
+                    logger.warning("Local LLM failed, falling back to OpenRouter", error=str(e))
+                    return await self.openrouter_client.generate(
+                        messages=messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs,
+                    )
+                if self.nvidia_client and self._nvidia_available is not False:
+                    logger.warning("Local LLM failed, falling back to NVIDIA", error=str(e))
+                    return await self.nvidia_client.generate(
+                        messages=messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs,
+                    )
+                if self.cloud_client:
+                    logger.warning("Local LLM failed, falling back to cloud", error=str(e))
+                    return await self.cloud_client.generate(
+                        messages=messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs,
+                    )
             raise
 
     async def generate_stream(
@@ -757,20 +1430,50 @@ class LLMRouter:
             ):
                 yield chunk
         except Exception as e:
-            if (
-                self.settings.llm.routing.fallback_to_cloud
-                and provider == LLMProvider.OLLAMA
-                and self.cloud_client
-            ):
-                logger.warning("Local LLM streaming failed, falling back to cloud", error=str(e))
+            if self.settings.llm.routing.fallback_to_cloud and provider == LLMProvider.OLLAMA:
                 self._local_available = False
-                async for chunk in self.cloud_client.generate_stream(
-                    messages=messages,
-                    tools=tools,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    **kwargs,
-                ):
-                    yield chunk
-            else:
-                raise
+                if self.gemini_client and self._gemini_available is not False:
+                    logger.warning("Local LLM streaming failed, falling back to Gemini", error=str(e))
+                    async for chunk in self.gemini_client.generate_stream(
+                        messages=messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs,
+                    ):
+                        yield chunk
+                    return
+                if self.openrouter_client and self._openrouter_available is not False:
+                    logger.warning("Local LLM streaming failed, falling back to OpenRouter", error=str(e))
+                    async for chunk in self.openrouter_client.generate_stream(
+                        messages=messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs,
+                    ):
+                        yield chunk
+                    return
+                if self.nvidia_client and self._nvidia_available is not False:
+                    logger.warning("Local LLM streaming failed, falling back to NVIDIA", error=str(e))
+                    async for chunk in self.nvidia_client.generate_stream(
+                        messages=messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs,
+                    ):
+                        yield chunk
+                    return
+                if self.cloud_client:
+                    logger.warning("Local LLM streaming failed, falling back to cloud", error=str(e))
+                    async for chunk in self.cloud_client.generate_stream(
+                        messages=messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs,
+                    ):
+                        yield chunk
+                    return
+            raise

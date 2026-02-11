@@ -283,6 +283,35 @@ class Orchestrator:
 
         return message.id
 
+    async def chat(
+        self,
+        channel: str,
+        user_id: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """
+        Process a message synchronously and return the response content.
+        Used by the web API and channel handlers that need a direct reply.
+        """
+        message = QueuedMessage(
+            channel=channel,
+            user_id=user_id,
+            content=content,
+            metadata=metadata or {},
+        )
+        try:
+            response = await self._handle_message(message)
+            return response.content if response else ""
+        except Exception as e:
+            logger.exception("Chat failed", error=str(e))
+            audit_logger.action_failed(
+                action_type="chat",
+                error=str(e),
+                channel=channel,
+            )
+            return f"I encountered an error processing your message: {str(e)}"
+
     async def chat_edit(
         self,
         channel: str,

@@ -1,7 +1,14 @@
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Shield, Check, X, Loader2, Clock, AlertCircle, RefreshCw } from 'lucide-react';
+import { Shield, Check, X, Loader2, Clock, AlertCircle, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
 import { approvalsApi } from '../services/api';
+
+interface ApprovalOutcome {
+  status: 'success' | 'partial' | 'failed';
+  applied?: string[];
+  failed?: string[];
+}
 
 interface Approval {
   id: string;
@@ -35,6 +42,7 @@ const defaultAction = { icon: '⚡', color: 'blue', gradient: 'from-blue-500/10 
 
 export default function Approvals() {
   const queryClient = useQueryClient();
+  const [lastOutcome, setLastOutcome] = useState<ApprovalOutcome | null>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['approvals'],
@@ -42,16 +50,23 @@ export default function Approvals() {
       const response = await approvalsApi.getPending();
       return response.data.approvals as Approval[];
     },
-    refetchInterval: 5000,
+    refetchInterval: 10000,
     retry: 2,
   });
 
   const respondMutation = useMutation({
     mutationFn: async ({ id, approved }: { id: string; approved: boolean }) => {
-      await approvalsApi.respond(id, approved);
+      const res = await approvalsApi.respond(id, approved);
+      return res.data as { processed?: boolean; outcome?: ApprovalOutcome };
     },
-    onSuccess: () => {
+    onSuccess: (payload) => {
       queryClient.invalidateQueries({ queryKey: ['approvals'] });
+      if (payload?.outcome) {
+        setLastOutcome(payload.outcome);
+        setTimeout(() => setLastOutcome(null), 15000);
+      } else {
+        setLastOutcome(null);
+      }
     },
   });
 
@@ -77,6 +92,44 @@ export default function Approvals() {
           <RefreshCw className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Last approval task outcome (success / partial / failed) */}
+      {lastOutcome && (
+        <div
+          className={`mb-6 glass-card p-4 flex items-start gap-3 ${
+            lastOutcome.status === 'success'
+              ? 'border-green-500/30 bg-green-500/5'
+              : lastOutcome.status === 'partial'
+                ? 'border-amber-500/30 bg-amber-500/5'
+                : 'border-red-500/30 bg-red-500/5'
+          }`}
+        >
+          {lastOutcome.status === 'success' ? (
+            <CheckCircle2 className="w-6 h-6 text-green-400 flex-shrink-0 mt-0.5" />
+          ) : lastOutcome.status === 'partial' ? (
+            <AlertTriangle className="w-6 h-6 text-amber-400 flex-shrink-0 mt-0.5" />
+          ) : (
+            <XCircle className="w-6 h-6 text-red-400 flex-shrink-0 mt-0.5" />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-theme-primary">
+              {lastOutcome.status === 'success' && 'Task completed successfully'}
+              {lastOutcome.status === 'partial' && 'Task completed with some failures'}
+              {lastOutcome.status === 'failed' && 'Task failed'}
+            </p>
+            {lastOutcome.applied?.length ? (
+              <p className="text-sm text-green-400/90 mt-1">
+                Applied: {lastOutcome.applied.join(', ')}
+              </p>
+            ) : null}
+            {lastOutcome.failed?.length ? (
+              <p className="text-sm text-red-400/90 mt-1">
+                Failed: {lastOutcome.failed.join('; ')}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      )}
 
       {/* Error state */}
       {isError && (

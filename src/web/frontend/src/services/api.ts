@@ -8,9 +8,16 @@ const api = axios.create({
   },
 });
 
-// Request interceptor: add token from persisted auth (avoids 401 race on rehydration)
+// Request interceptor: add token (prefer in-memory from login, else localStorage)
 api.interceptors.request.use((config) => {
   try {
+    // Use token already set on axios (e.g. right after login, before persist writes)
+    const existing = config.headers.Authorization ?? api.defaults.headers.common?.Authorization;
+    if (existing && typeof existing === 'string' && existing.startsWith('Bearer ')) {
+      config.headers.Authorization = existing;
+      return config;
+    }
+    // Fall back to persisted auth (after rehydration / page reload)
     const stored = localStorage.getItem('aria-auth');
     if (stored) {
       const parsed = JSON.parse(stored);

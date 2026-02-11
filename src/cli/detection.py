@@ -34,6 +34,9 @@ class DetectionResults:
     playwright: ToolStatus = field(default_factory=ToolStatus)
     node: ToolStatus = field(default_factory=ToolStatus)
     anthropic_key: ToolStatus = field(default_factory=ToolStatus)
+    google_key: ToolStatus = field(default_factory=ToolStatus)
+    openrouter_key: ToolStatus = field(default_factory=ToolStatus)
+    nvidia_key: ToolStatus = field(default_factory=ToolStatus)
     brave_key: ToolStatus = field(default_factory=ToolStatus)
 
 
@@ -51,6 +54,9 @@ class SystemDetector:
         self.check_playwright()
         self.check_node()
         self.check_anthropic_key()
+        self.check_google_key()
+        self.check_openrouter_key()
+        self.check_nvidia_key()
         self.check_brave_key()
         return self.results
 
@@ -219,6 +225,81 @@ class SystemDetector:
         self.results.anthropic_key = status
         return status
 
+    def check_google_key(self) -> ToolStatus:
+        """Check for Google (Gemini) API key in env or .env file."""
+        status = self.results.google_key
+
+        key = os.environ.get("GOOGLE_API_KEY", "")
+        if key:
+            status.installed = True
+            status.extra["source"] = "environment"
+            self.results.google_key = status
+            return status
+
+        env_path = Path(".env")
+        if env_path.exists():
+            content = env_path.read_text()
+            for line in content.split("\n"):
+                line = line.strip()
+                if line.startswith("GOOGLE_API_KEY=") and len(line.split("=", 1)[1].strip()) > 0:
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if val:
+                        status.installed = True
+                        status.extra["source"] = ".env"
+                        break
+        self.results.google_key = status
+        return status
+
+    def check_openrouter_key(self) -> ToolStatus:
+        """Check for OpenRouter API key in env or .env file."""
+        status = self.results.openrouter_key
+
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        if key:
+            status.installed = True
+            status.extra["source"] = "environment"
+            self.results.openrouter_key = status
+            return status
+
+        env_path = Path(".env")
+        if env_path.exists():
+            content = env_path.read_text()
+            for line in content.split("\n"):
+                line = line.strip()
+                if line.startswith("OPENROUTER_API_KEY=") and len(line.split("=", 1)[1].strip()) > 0:
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if val:
+                        status.installed = True
+                        status.extra["source"] = ".env"
+                        break
+        self.results.openrouter_key = status
+        return status
+
+    def check_nvidia_key(self) -> ToolStatus:
+        """Check for NVIDIA API key in env or .env file."""
+        status = self.results.nvidia_key
+
+        key = os.environ.get("NVIDIA_API_KEY", "")
+        if key:
+            status.installed = True
+            status.extra["source"] = "environment"
+            self.results.nvidia_key = status
+            return status
+
+        env_path = Path(".env")
+        if env_path.exists():
+            content = env_path.read_text()
+            for line in content.split("\n"):
+                line = line.strip()
+                if line.startswith("NVIDIA_API_KEY=") and len(line.split("=", 1)[1].strip()) > 0:
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if val:
+                        status.installed = True
+                        status.extra["source"] = ".env"
+                        break
+        self.results.nvidia_key = status
+        return status
+
     def check_brave_key(self) -> ToolStatus:
         """Check for Brave Search API key in environment."""
         status = self.results.brave_key
@@ -297,6 +378,77 @@ class SystemDetector:
             return True, "Key is valid"
         except ImportError:
             return False, "anthropic package not installed"
+        except Exception as e:
+            return False, str(e)
+
+    @staticmethod
+    def validate_google_key(api_key: str) -> tuple[bool, str]:
+        """Validate a Google (Gemini) API key with a minimal test call."""
+        try:
+            import google.generativeai as genai
+
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-2.0-flash")
+            response = model.generate_content("Hi", generation_config={"max_output_tokens": 5})
+            if response and response.candidates:
+                return True, "Key is valid"
+            return False, "No response from API"
+        except ImportError:
+            return False, "google-generativeai package not installed"
+        except Exception as e:
+            return False, str(e)
+
+    @staticmethod
+    def validate_openrouter_key(api_key: str) -> tuple[bool, str]:
+        """Validate an OpenRouter API key with a minimal test call."""
+        try:
+            import httpx
+
+            resp = httpx.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "anthropic/claude-3.5-haiku",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 5,
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return True, "Key is valid"
+            return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
+        except ImportError:
+            return False, "httpx not installed"
+        except Exception as e:
+            return False, str(e)
+
+    @staticmethod
+    def validate_nvidia_key(api_key: str) -> tuple[bool, str]:
+        """Validate an NVIDIA API key with a minimal test call."""
+        try:
+            import httpx
+
+            resp = httpx.post(
+                "https://integrate.api.nvidia.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "moonshotai/kimi-k2.5",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 5,
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return True, "Key is valid"
+            return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
+        except ImportError:
+            return False, "httpx not installed"
         except Exception as e:
             return False, str(e)
 

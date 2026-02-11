@@ -200,11 +200,13 @@ class SelfHealingService:
             # Try pattern-based remediation first
             detected_by_pattern: dict[str, str] = {}
             matched_lines: set[int] = set()
+            matched_lines_by_action: dict[str, list[int]] = {}
             for i, line in enumerate(error_lines):
                 for pattern, action_key, desc in self._patterns:
                     if re.search(pattern, line, re.IGNORECASE):
                         detected_by_pattern[action_key] = desc or line[:200]
                         matched_lines.add(i)
+                        matched_lines_by_action.setdefault(action_key, []).append(i)
                         break
 
             for action_key, desc in detected_by_pattern.items():
@@ -212,6 +214,18 @@ class SelfHealingService:
                     result["skipped"].append(f"{action_key}: already attempted")
                     continue
                 result["detected"].append(desc)
+                # llm_analyze: pass matched lines to LLM for code_edit etc.
+                if action_key == "llm_analyze":
+                    indices = matched_lines_by_action.get("llm_analyze", [])
+                    llm_lines = [error_lines[j] for j in indices][-10:]
+                    if self._llm_config.get("enabled") and self._llm_router and llm_lines:
+                        llm_result = await self._llm_analyze_and_fix(llm_lines)
+                        if llm_result:
+                            result["fixed"].extend(llm_result.get("fixed", []))
+                            result["failed"].extend(llm_result.get("failed", []))
+                            result["detected"].extend(llm_result.get("detected", []))
+                        self._attempted.add(action_key)
+                    continue
                 success, msg = await self._run_remediation(action_key)
                 if success:
                     result["fixed"].append(f"{action_key}: {msg}")
@@ -417,6 +431,12 @@ Be conservative. Only suggest actions you are confident about (confidence >= 0.7
                         applied.append(e["file_path"])
                     else:
                         failed.append(f"{e['file_path']}: {msg}")
+                status = "success" if not failed else ("partial" if applied else "failed")
+                if result.request_id and self._security_guardian:
+                    self._security_guardian.set_approval_outcome(
+                        result.request_id,
+                        {"status": status, "applied": applied, "failed": failed},
+                    )
                 if applied:
                     logger.info("Self-healing (code_edit): applied", files=applied)
                     if self._event_bus:
@@ -549,16 +569,20 @@ Be conservative. Only suggest actions you are confident about (confidence >= 0.7
         error_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
         logger.error("Crash detected, attempting self-heal", error=str(exc))
 
-        # Try pattern match on traceback first (no LLM needed)
+        # Try pattern match on traceback first
         error_text = "".join(error_lines)
         for pattern, action_key, _ in self._patterns:
-            if re.search(pattern, error_text, re.IGNORECASE):
-                if action_key not in self._attempted:
-                    success, msg = await self._run_remediation(action_key)
-                    if success:
-                        self._attempted.add(action_key)
-                        return {"fixed": [f"{action_key}: {msg}"], "detected": [str(exc)]}
-                    self._attempted.add(action_key)
+            if re.search(pattern, error_text, re.IGNORECASE) and action_key not in self._attempted:
+                self._attempted.add(action_key)
+                if action_key == "llm_analyze":
+                    if self._llm_config.get("enabled") and self._llm_router:
+                        llm_result = await self._llm_analyze_and_fix(error_lines)
+                        if llm_result and (llm_result.get("fixed") or llm_result.get("detected")):
+                            return llm_result
+                    continue
+                success, msg = await self._run_remediation(action_key)
+                if success:
+                    return {"fixed": [f"{action_key}: {msg}"], "detected": [str(exc)]}
 
         # Try LLM analysis (crash may not be in log yet)
         if self._llm_config.get("enabled") and self._llm_router:

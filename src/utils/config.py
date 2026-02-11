@@ -43,6 +43,36 @@ class CloudLLMConfig(BaseModel):
     enabled: bool = True
 
 
+class GeminiLLMConfig(BaseModel):
+    """Google Gemini (Nano, Flash, Pro, etc.) configuration. Uses GOOGLE_API_KEY."""
+
+    provider: str = "gemini"
+    model: str = "gemini-2.0-flash"
+    max_tokens: int = 4096
+    timeout: int = 120
+    enabled: bool = False
+
+
+class OpenRouterLLMConfig(BaseModel):
+    """OpenRouter (400+ models via one API). Uses OPENROUTER_API_KEY."""
+
+    provider: str = "openrouter"
+    model: str = "anthropic/claude-3.5-sonnet"
+    max_tokens: int = 4096
+    timeout: int = 120
+    enabled: bool = False
+
+
+class NvidiaLLMConfig(BaseModel):
+    """NVIDIA NIM (integrate.api.nvidia.com). Uses NVIDIA_API_KEY."""
+
+    provider: str = "nvidia"
+    model: str = "moonshotai/kimi-k2.5"
+    max_tokens: int = 16384
+    timeout: int = 120
+    enabled: bool = False
+
+
 class LLMRoutingConfig(BaseModel):
     """LLM routing configuration."""
 
@@ -63,6 +93,9 @@ class LLMConfig(BaseModel):
 
     local: LocalLLMConfig = Field(default_factory=LocalLLMConfig)
     cloud: CloudLLMConfig = Field(default_factory=CloudLLMConfig)
+    gemini: GeminiLLMConfig = Field(default_factory=GeminiLLMConfig)
+    openrouter: OpenRouterLLMConfig = Field(default_factory=OpenRouterLLMConfig)
+    nvidia: NvidiaLLMConfig = Field(default_factory=NvidiaLLMConfig)
     routing: LLMRoutingConfig = Field(default_factory=LLMRoutingConfig)
 
 
@@ -342,6 +375,9 @@ class Settings(BaseSettings):
 
     # API keys from environment
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    google_api_key: str = Field(default="", alias="GOOGLE_API_KEY")
+    openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
+    nvidia_api_key: str = Field(default="", alias="NVIDIA_API_KEY")
     slack_bot_token: str = Field(default="", alias="SLACK_BOT_TOKEN")
     slack_app_token: str = Field(default="", alias="SLACK_APP_TOKEN")
     jwt_secret: str = Field(default="change-me-in-production", alias="JWT_SECRET")

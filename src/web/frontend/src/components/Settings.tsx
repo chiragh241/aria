@@ -39,6 +39,15 @@ interface FullConfig {
     ollama_model: string;
     ollama_base_url: string;
     cloud_enabled: boolean;
+    gemini_enabled?: boolean;
+    gemini_model?: string;
+    gemini_key_set?: boolean;
+    openrouter_enabled?: boolean;
+    openrouter_model?: string;
+    openrouter_key_set?: boolean;
+    nvidia_enabled?: boolean;
+    nvidia_model?: string;
+    nvidia_key_set?: boolean;
   };
   channels: {
     web_enabled: boolean;
@@ -88,6 +97,9 @@ interface Detection {
   playwright: { installed: boolean; has_chromium: boolean };
   node: { installed: boolean; version: string };
   anthropic_key: { found: boolean; source: string };
+  google_key?: { found: boolean; source: string };
+  openrouter_key?: { found: boolean; source: string };
+  nvidia_key?: { found: boolean; source: string };
   brave_key: { found: boolean };
 }
 
@@ -337,6 +349,18 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
   const [ollamaUrl, setOllamaUrl] = useState(config.llm.ollama_base_url);
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
+  const [geminiEnabled, setGeminiEnabled] = useState(config.llm.gemini_enabled ?? false);
+  const [geminiModel, setGeminiModel] = useState(config.llm.gemini_model ?? 'gemini-2.0-flash');
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [openrouterEnabled, setOpenrouterEnabled] = useState(config.llm.openrouter_enabled ?? false);
+  const [openrouterModel, setOpenrouterModel] = useState(config.llm.openrouter_model ?? 'anthropic/claude-3.5-sonnet');
+  const [openrouterApiKey, setOpenrouterApiKey] = useState('');
+  const [showOpenrouterKey, setShowOpenrouterKey] = useState(false);
+  const [nvidiaEnabled, setNvidiaEnabled] = useState(config.llm.nvidia_enabled ?? false);
+  const [nvidiaModel, setNvidiaModel] = useState(config.llm.nvidia_model ?? 'moonshotai/kimi-k2.5');
+  const [nvidiaApiKey, setNvidiaApiKey] = useState('');
+  const [showNvidiaKey, setShowNvidiaKey] = useState(false);
   const [needsRestart, setNeedsRestart] = useState(false);
 
   // Sync state when config refreshes (fixes stale enabled state)
@@ -346,6 +370,12 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
     setAnthropicModel(config.llm.anthropic_model);
     setOllamaModel(config.llm.ollama_model);
     setOllamaUrl(config.llm.ollama_base_url);
+    setGeminiEnabled(config.llm.gemini_enabled ?? false);
+    setGeminiModel(config.llm.gemini_model ?? 'gemini-2.0-flash');
+    setOpenrouterEnabled(config.llm.openrouter_enabled ?? false);
+    setOpenrouterModel(config.llm.openrouter_model ?? 'anthropic/claude-3.5-sonnet');
+    setNvidiaEnabled(config.llm.nvidia_enabled ?? false);
+    setNvidiaModel(config.llm.nvidia_model ?? 'moonshotai/kimi-k2.5');
   }, [config]);
 
   const saveMutation = useMutation({
@@ -356,19 +386,43 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
         anthropic_model: anthropicModel,
         ollama_model: ollamaModel,
         ollama_base_url: ollamaUrl,
+        gemini_enabled: geminiEnabled,
+        gemini_model: geminiModel,
+        openrouter_enabled: openrouterEnabled,
+        openrouter_model: openrouterModel,
+        nvidia_enabled: nvidiaEnabled,
+        nvidia_model: nvidiaModel,
       };
       if (apiKey) data.anthropic_api_key = apiKey;
+      if (geminiApiKey) data.google_api_key = geminiApiKey;
+      if (openrouterApiKey) data.openrouter_api_key = openrouterApiKey;
+      if (nvidiaApiKey) data.nvidia_api_key = nvidiaApiKey;
       await configApi.updateLlm(data);
     },
     onSuccess: () => {
       setNeedsRestart(true);
       setApiKey('');
+      setGeminiApiKey('');
+      setOpenrouterApiKey('');
+      setNvidiaApiKey('');
       queryClient.invalidateQueries({ queryKey: ['config'] });
     },
   });
 
   const validateMutation = useMutation({
     mutationFn: async () => (await configApi.validateKey('anthropic', apiKey)).data,
+  });
+
+  const validateGeminiMutation = useMutation({
+    mutationFn: async () => (await configApi.validateKey('gemini', geminiApiKey)).data,
+  });
+
+  const validateOpenrouterMutation = useMutation({
+    mutationFn: async () => (await configApi.validateKey('openrouter', openrouterApiKey)).data,
+  });
+
+  const validateNvidiaMutation = useMutation({
+    mutationFn: async () => (await configApi.validateKey('nvidia', nvidiaApiKey)).data,
   });
 
   return (
@@ -389,6 +443,36 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
             }
           />
           <StatusBadge
+            ok={geminiEnabled && (detection.google_key?.found ?? false)}
+            label={
+              !geminiEnabled
+                ? 'Gemini disabled'
+                : detection.google_key?.found
+                  ? `Gemini enabled (${detection.google_key.source ?? 'key set'})`
+                  : 'Gemini enabled — no API key'
+            }
+          />
+          <StatusBadge
+            ok={openrouterEnabled && (detection.openrouter_key?.found ?? false)}
+            label={
+              !openrouterEnabled
+                ? 'OpenRouter disabled'
+                : detection.openrouter_key?.found
+                  ? `OpenRouter enabled (${detection.openrouter_key.source ?? 'key set'})`
+                  : 'OpenRouter enabled — no API key'
+            }
+          />
+          <StatusBadge
+            ok={nvidiaEnabled && (detection.nvidia_key?.found ?? false)}
+            label={
+              !nvidiaEnabled
+                ? 'NVIDIA NIM disabled'
+                : detection.nvidia_key?.found
+                  ? `NVIDIA NIM enabled (${detection.nvidia_key.source ?? 'key set'})`
+                  : 'NVIDIA NIM enabled — no API key'
+            }
+          />
+          <StatusBadge
             ok={ollamaEnabled && detection.ollama.running}
             label={
               !ollamaEnabled
@@ -402,6 +486,333 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
           />
         </div>
       )}
+
+      <SectionCard title="Ollama (Local)">
+        <div className="space-y-4">
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm text-theme-primary">Enable Ollama (local)</span>
+            <input
+              type="checkbox"
+              checked={ollamaEnabled}
+              onChange={(e) => setOllamaEnabled(e.target.checked)}
+              className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
+
+          {ollamaEnabled && (
+            <>
+              <div>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Model</label>
+                {detection?.ollama.models && detection.ollama.models.length > 0 ? (
+                  <select
+                    value={ollamaModel}
+                    onChange={(e) => setOllamaModel(e.target.value)}
+                    className="w-full px-3 py-2.5 glass-input"
+                  >
+                    {detection.ollama.models.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                    {!detection.ollama.models.includes(ollamaModel) && (
+                      <option value={ollamaModel}>{ollamaModel}</option>
+                    )}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={ollamaModel}
+                    onChange={(e) => setOllamaModel(e.target.value)}
+                    className="w-full px-3 py-2.5 glass-input"
+                  />
+                )}
+              </div>
+              <div>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Base URL</label>
+                <input
+                  type="text"
+                  value={ollamaUrl}
+                  onChange={(e) => setOllamaUrl(e.target.value)}
+                  className="w-full px-3 py-2.5 glass-input"
+                />
+              </div>
+            </>
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Google Gemini">
+        <div className="space-y-4">
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm text-theme-primary">Enable Gemini (Nano, Flash, Pro — uses GOOGLE_API_KEY)</span>
+            <input
+              type="checkbox"
+              checked={geminiEnabled}
+              onChange={(e) => setGeminiEnabled(e.target.checked)}
+              className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
+
+          {geminiEnabled && (
+            <>
+              <div>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Model</label>
+                <select
+                  value={geminiModel}
+                  onChange={(e) => setGeminiModel(e.target.value)}
+                  className="w-full px-3 py-2.5 glass-input"
+                >
+                  <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                  <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                  <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                  <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">
+                  API Key (Google AI Studio){' '}
+                  {config.llm.gemini_key_set && (
+                    <span className="text-green-400 normal-case tracking-normal">(set)</span>
+                  )}
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type={showGeminiKey ? 'text' : 'password'}
+                      value={geminiApiKey}
+                      onChange={(e) => setGeminiApiKey(e.target.value)}
+                      placeholder={
+                        config.llm.gemini_key_set
+                          ? 'Enter new key to replace...'
+                          : 'AIza...'
+                      }
+                      className="w-full px-3 py-2.5 glass-input pr-10"
+                    />
+                    <button
+                      onClick={() => setShowGeminiKey(!showGeminiKey)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-theme-secondary hover:text-theme-primary transition-colors"
+                    >
+                      {showGeminiKey ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => validateGeminiMutation.mutate()}
+                    disabled={!geminiApiKey || validateGeminiMutation.isPending}
+                    className="px-3 py-2 btn-theme-secondary hover:bg-theme-muted disabled:opacity-50 text-theme-primary rounded-lg text-sm flex items-center gap-1.5 border border-theme transition-all"
+                  >
+                    {validateGeminiMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Key className="w-4 h-4" />
+                    )}
+                    Validate
+                  </button>
+                </div>
+                {validateGeminiMutation.data && (
+                  <p
+                    className={`text-xs mt-1.5 ${
+                      (validateGeminiMutation.data as any).valid
+                        ? 'text-green-400'
+                        : 'text-red-400'
+                    }`}
+                  >
+                    {(validateGeminiMutation.data as any).message}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="OpenRouter">
+        <div className="space-y-4">
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm text-theme-primary">Enable OpenRouter (400+ models, one API key)</span>
+            <input
+              type="checkbox"
+              checked={openrouterEnabled}
+              onChange={(e) => setOpenrouterEnabled(e.target.checked)}
+              className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
+
+          {openrouterEnabled && (
+            <>
+              <div>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Model</label>
+                <select
+                  value={openrouterModel}
+                  onChange={(e) => setOpenrouterModel(e.target.value)}
+                  className="w-full px-3 py-2.5 glass-input"
+                >
+                  <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                  <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
+                  <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash</option>
+                  <option value="google/gemini-flash-1.5">Gemini 1.5 Flash</option>
+                  <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+                  <option value="openai/gpt-4o">GPT-4o</option>
+                  <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">
+                  API Key (openrouter.ai){' '}
+                  {config.llm.openrouter_key_set && (
+                    <span className="text-green-400 normal-case tracking-normal">(set)</span>
+                  )}
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type={showOpenrouterKey ? 'text' : 'password'}
+                      value={openrouterApiKey}
+                      onChange={(e) => setOpenrouterApiKey(e.target.value)}
+                      placeholder={
+                        config.llm.openrouter_key_set
+                          ? 'Enter new key to replace...'
+                          : 'sk-or-...'
+                      }
+                      className="w-full px-3 py-2.5 glass-input pr-10"
+                    />
+                    <button
+                      onClick={() => setShowOpenrouterKey(!showOpenrouterKey)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-theme-secondary hover:text-theme-primary transition-colors"
+                    >
+                      {showOpenrouterKey ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => validateOpenrouterMutation.mutate()}
+                    disabled={!openrouterApiKey || validateOpenrouterMutation.isPending}
+                    className="px-3 py-2 btn-theme-secondary hover:bg-theme-muted disabled:opacity-50 text-theme-primary rounded-lg text-sm flex items-center gap-1.5 border border-theme transition-all"
+                  >
+                    {validateOpenrouterMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Key className="w-4 h-4" />
+                    )}
+                    Validate
+                  </button>
+                </div>
+                {validateOpenrouterMutation.data && (
+                  <p
+                    className={`text-xs mt-1.5 ${
+                      (validateOpenrouterMutation.data as any).valid
+                        ? 'text-green-400'
+                        : 'text-red-400'
+                    }`}
+                  >
+                    {(validateOpenrouterMutation.data as any).message}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="NVIDIA NIM">
+        <div className="space-y-4">
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm text-theme-primary">Enable NVIDIA NIM (integrate.api.nvidia.com)</span>
+            <input
+              type="checkbox"
+              checked={nvidiaEnabled}
+              onChange={(e) => setNvidiaEnabled(e.target.checked)}
+              className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
+
+          {nvidiaEnabled && (
+            <>
+              <div>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">
+                  Which model would you like to use?
+                </label>
+                <select
+                  value={nvidiaModel}
+                  onChange={(e) => setNvidiaModel(e.target.value)}
+                  className="w-full px-3 py-2.5 glass-input"
+                >
+                  <option value="moonshotai/kimi-k2-thinking">Kimi K2 Thinking (reasoning + answer)</option>
+                  <option value="moonshotai/kimi-k2.5">Kimi K2.5 (Moonshot)</option>
+                  <option value="meta/llama-3.3-70b-instruct">Llama 3.3 70B</option>
+                  <option value="mistralai/mixtral-8x22b-instruct">Mixtral 8x22B</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">
+                  API Key (NVIDIA API){' '}
+                  {config.llm.nvidia_key_set && (
+                    <span className="text-green-400 normal-case tracking-normal">(set)</span>
+                  )}
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type={showNvidiaKey ? 'text' : 'password'}
+                      value={nvidiaApiKey}
+                      onChange={(e) => setNvidiaApiKey(e.target.value)}
+                      placeholder={
+                        config.llm.nvidia_key_set
+                          ? 'Enter new key to replace...'
+                          : 'NVIDIA API key'
+                      }
+                      className="w-full px-3 py-2.5 glass-input pr-10"
+                    />
+                    <button
+                      onClick={() => setShowNvidiaKey(!showNvidiaKey)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-theme-secondary hover:text-theme-primary transition-colors"
+                    >
+                      {showNvidiaKey ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => validateNvidiaMutation.mutate()}
+                    disabled={!nvidiaApiKey || validateNvidiaMutation.isPending}
+                    className="px-3 py-2 btn-theme-secondary hover:bg-theme-muted disabled:opacity-50 text-theme-primary rounded-lg text-sm flex items-center gap-1.5 border border-theme transition-all"
+                  >
+                    {validateNvidiaMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Key className="w-4 h-4" />
+                    )}
+                    Validate
+                  </button>
+                </div>
+                {validateNvidiaMutation.data && (
+                  <p
+                    className={`text-xs mt-1.5 ${
+                      (validateNvidiaMutation.data as any).valid
+                        ? 'text-green-400'
+                        : 'text-red-400'
+                    }`}
+                  >
+                    {(validateNvidiaMutation.data as any).message}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </SectionCard>
 
       <SectionCard title="Anthropic Claude">
         <div className="space-y-4">
@@ -485,60 +896,6 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
                     {(validateMutation.data as any).message}
                   </p>
                 )}
-              </div>
-            </>
-          )}
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Ollama (Local)">
-        <div className="space-y-4">
-          <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-sm text-theme-primary">Enable Ollama (local)</span>
-            <input
-              type="checkbox"
-              checked={ollamaEnabled}
-              onChange={(e) => setOllamaEnabled(e.target.checked)}
-              className="w-5 h-5 rounded bg-theme-muted border-slate-600 text-blue-600 focus:ring-blue-500"
-            />
-          </label>
-
-          {ollamaEnabled && (
-            <>
-              <div>
-                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Model</label>
-                {detection?.ollama.models && detection.ollama.models.length > 0 ? (
-                  <select
-                    value={ollamaModel}
-                    onChange={(e) => setOllamaModel(e.target.value)}
-                    className="w-full px-3 py-2.5 glass-input"
-                  >
-                    {detection.ollama.models.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                    {!detection.ollama.models.includes(ollamaModel) && (
-                      <option value={ollamaModel}>{ollamaModel}</option>
-                    )}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={ollamaModel}
-                    onChange={(e) => setOllamaModel(e.target.value)}
-                    className="w-full px-3 py-2.5 glass-input"
-                  />
-                )}
-              </div>
-              <div>
-                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Base URL</label>
-                <input
-                  type="text"
-                  value={ollamaUrl}
-                  onChange={(e) => setOllamaUrl(e.target.value)}
-                  className="w-full px-3 py-2.5 glass-input"
-                />
               </div>
             </>
           )}
