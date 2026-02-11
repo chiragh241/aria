@@ -6,10 +6,10 @@ aria:
 llm:
   local:
     provider: ollama
-    model: llama3.1:8b
+    model: llama3.2:latest
     base_url: http://localhost:11434
     timeout: 60
-    enabled: true
+    enabled: false
   cloud:
     provider: anthropic
     model: claude-sonnet-4-20250514
@@ -24,13 +24,14 @@ llm:
     enabled: false
   openrouter:
     provider: openrouter
-    model: anthropic/claude-3.5-sonnet
+    model: openai/gpt-oss-120b:free
     max_tokens: 4096
     timeout: 120
-    enabled: false
+    enabled: true
+    use_free_models: true
   nvidia:
     provider: nvidia
-    model: moonshotai/kimi-k2.5
+    model: moonshotai/kimi-k2-thinking
     max_tokens: 16384
     timeout: 120
     enabled: false
@@ -41,10 +42,10 @@ llm:
     - complex_reasoning
     - skill_creation
     - multi_step_planning
-    fallback_to_cloud: false
+    fallback_to_cloud: true
 channels:
   slack:
-    enabled: false
+    enabled: true
     bot_token: ${SLACK_BOT_TOKEN}
     app_token: ${SLACK_APP_TOKEN}
     allowed_channels: []
@@ -65,6 +66,7 @@ security:
   approval_timeout: 300
   approval_channels:
   - web
+  - slack
   require_all_approvals: false
 sandbox:
   default: direct
@@ -129,11 +131,11 @@ skills:
       headless: true
       timeout: 30
     calendar:
-      enabled: true
+      enabled: false
     email:
-      enabled: true
+      enabled: false
     sms:
-      enabled: true
+      enabled: false
     tts:
       enabled: true
       provider: edge-tts
@@ -166,20 +168,20 @@ skills:
     webhook:
       enabled: false
     agent:
-      enabled: true
+      enabled: false
     research:
       enabled: false
     notion:
-      enabled: true
+      enabled: false
       api_key: ''
     todoist:
-      enabled: true
+      enabled: false
       api_key: ''
     linear:
-      enabled: true
+      enabled: false
       api_key: ''
     spotify:
-      enabled: true
+      enabled: false
       client_id: ''
       client_secret: ''
   learned:
@@ -187,24 +189,6 @@ skills:
     directory: ./data/learned_skills
     auto_test: true
     require_approval: true
-onecontext:
-  enabled: true
-  working_path: ./data/aria_workspace
-  sync_on_agent_complete: true
-proactive:
-  enabled: true
-  self_healing_enabled: true
-  self_healing_check_interval_seconds: 10
-  morning_briefing: true
-  briefing_time: "08:00"
-  follow_up_tracking: true
-  suggestions_enabled: true
-  context_reminders: true
-  time_of_day_awareness: true
-  meeting_prep: true
-  deadline_reminders: true
-  focus_mode: true
-  smart_summaries: true
 dashboard:
   title: Aria Control Center
   theme: dark
@@ -215,3 +199,7 @@ dashboard:
     logs: true
     skills: true
     metrics: true
+onecontext:
+  enabled: true
+  working_path: ./data/aria_workspace
+  sync_on_agent_complete: true

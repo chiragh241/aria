@@ -10,7 +10,15 @@ from uuid import uuid4
 
 from ..utils.config import get_settings
 from ..utils.logging import get_logger
+from .context_efficiency import (
+    cap_tool_result_for_persist,
+    estimate_tokens_messages,
+    get_history_limit_for_channel,
+    limit_history_by_turns,
+    normalize_turns,
+)
 from .llm_router import LLMMessage
+from .workspace import load_workspace_content
 
 logger = get_logger(__name__)
 
@@ -238,8 +246,10 @@ class ContextManager:
         self.settings = get_settings()
         self._contexts: dict[str, ConversationContext] = {}
         self._lock = asyncio.Lock()
+        self._compaction_locks: dict[str, asyncio.Lock] = {}  # Per-context key, serialize compaction
         self._summarizer: Any = None
         self._vector_memory: Any = None
+        self._llm_router: Any = None  # For token count and context window
 
         # Persistence directory
         self._persist_dir = Path(self.settings.aria.data_dir).expanduser() / "conversations"
@@ -259,16 +269,30 @@ class ContextManager:
         """Set vector memory for storing summaries."""
         self._vector_memory = vm
 
+    def set_llm_router(self, router: Any) -> None:
+        """Set LLM router for token counting and context window (efficiency)."""
+        self._llm_router = router
+
+    def _compaction_lock(self, key: str) -> asyncio.Lock:
+        """Per-context lock so only one compaction runs at a time for this context."""
+        if key not in self._compaction_locks:
+            self._compaction_locks[key] = asyncio.Lock()
+        return self._compaction_locks[key]
+
     def _get_persist_path(self, key: str) -> Path:
         """Get the file path for a context key."""
         safe_key = key.replace(":", "__").replace("/", "_")
         return self._persist_dir / f"{safe_key}.json"
 
     def _persist_context(self, key: str, context: ConversationContext) -> None:
-        """Save a context to disk."""
+        """Save a context to disk. Tool results are capped at persist."""
         try:
             path = self._get_persist_path(key)
             data = context.to_dict()
+            # Cap tool result content when persisting (session-level guard)
+            for msg in data.get("messages", []):
+                if msg.get("role") == "tool" and isinstance(msg.get("content"), str):
+                    msg["content"] = cap_tool_result_for_persist(msg["content"])
             path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
         except Exception as e:
             logger.warning("Failed to persist context", key=key, error=str(e))
@@ -295,13 +319,9 @@ class ContextManager:
                 context = ConversationContext.from_dict(data)
                 key = self._get_context_key(context.channel, context.user_id)
 
-                # Refresh the system prompt so prompt updates take effect
-                new_prompt = self._system_prompt.replace(
-                    "{{current_date}}", datetime.now().strftime("%Y-%m-%d")
-                ).replace(
-                    "{{user_id}}", context.user_id
-                ).replace(
-                    "{{channel}}", context.channel
+                # Refresh the system prompt (with workspace if enabled)
+                new_prompt = self._get_system_prompt_for_context(
+                    context.user_id, context.channel
                 )
                 # Replace the first system message (if any) with the updated prompt
                 for i, msg in enumerate(context.messages):
@@ -317,13 +337,46 @@ class ContextManager:
         if loaded > 0:
             logger.info("Loaded persisted conversations", count=loaded)
 
-    def _build_system_prompt(self) -> str:
-        """Build the system prompt for the AI assistant.
-
-        Inspired by OpenClaw's modular prompt architecture:
-        structured sections, genuine personality, and action-oriented tool guidance.
-        """
+    def _build_system_prompt(self, mode: str = "full") -> str:
+        """Build the system prompt (full or minimal for token savings)."""
         name = self.settings.aria.name
+        if mode == "minimal":
+            return self._build_system_prompt_minimal(name)
+        return self._build_system_prompt_full(name)
+
+    def _get_system_prompt_for_context(
+        self, user_id: str, channel: str, mode: str = "full"
+    ) -> str:
+        """System prompt with placeholders replaced and workspace content appended."""
+        base = self._build_system_prompt(mode)
+        prompt = (
+            base.replace("{{current_date}}", datetime.now().strftime("%Y-%m-%d"))
+            .replace("{{user_id}}", user_id)
+            .replace("{{channel}}", channel)
+        )
+        workspace = load_workspace_content(user_id)
+        if workspace:
+            prompt = prompt + "\n\n## From your workspace\n\n" + workspace
+        return prompt
+
+    def _build_system_prompt_minimal(self, name: str) -> str:
+        """Shorter system prompt (Tooling, Safety, Runtime only) for subagents or when context is large."""
+        sections = [
+            f"You are {name}, a personal AI assistant.",
+            "",
+            "## Tooling",
+            "Use filesystem, shell, browser, and other tools as needed. Prefer free approaches. Never refuse tasks; use tools to figure it out.",
+            "",
+            "## Safety",
+            "Keep user data private. Do not fabricate results. Report tool failures honestly.",
+            "",
+            "## Runtime",
+            f"assistant={name} | date={{{{current_date}}}} | user={{{{user_id}}}} | channel={{{{channel}}}}",
+        ]
+        return "\n".join(sections)
+
+    def _build_system_prompt_full(self, name: str) -> str:
+        """Full system prompt (modular sections)."""
         sections: list[str] = []
 
         # --- Identity (SOUL) ---
@@ -353,7 +406,7 @@ class ContextManager:
         sections.append("- image: Resize, convert, analyze images")
         sections.append("- video: Convert, trim, extract audio, thumbnails")
         sections.append("- documents: Extract text, convert, summarize documents")
-        sections.append("- workflow: Chain skills (workflow.run_chain) — e.g. research then draft then email")
+        sections.append("- workflow: Chain skills (workflow.run_chain) or run a named workflow (workflow.list_workflows, workflow.run_named_workflow) — e.g. feature-dev or bug-fix for plan → implement → verify.")
         sections.append("- agent: Delegate to research/coding/data agents (agent.research, agent.code, agent.handoff)")
         sections.append("- create_skill: Add a new skill when no existing one fits; then call it to complete the request")
         sections.append("")
@@ -471,10 +524,10 @@ class ContextManager:
                 try:
                     data = json.loads(path.read_text(encoding="utf-8"))
                     context = ConversationContext.from_dict(data)
-                    # Refresh system prompt
-                    new_prompt = self._system_prompt.replace(
-                        "{{current_date}}", datetime.now().strftime("%Y-%m-%d")
-                    ).replace("{{user_id}}", context.user_id).replace("{{channel}}", context.channel)
+                    # Refresh system prompt (with workspace if enabled)
+                    new_prompt = self._get_system_prompt_for_context(
+                        context.user_id, context.channel
+                    )
                     for i, msg in enumerate(context.messages):
                         if msg.role == "system":
                             context.messages[i] = LLMMessage(role="system", content=new_prompt)
@@ -495,14 +548,8 @@ class ContextManager:
                 topic_id=topic_id,
             )
 
-            # Add system message
-            system_prompt = self._system_prompt.replace(
-                "{{current_date}}", datetime.now().strftime("%Y-%m-%d")
-            ).replace(
-                "{{user_id}}", user_id
-            ).replace(
-                "{{channel}}", channel
-            )
+            # Add system message (with workspace if enabled)
+            system_prompt = self._get_system_prompt_for_context(user_id, channel)
             context.add_system_message(system_prompt)
 
             self._contexts[key] = context
@@ -629,38 +676,95 @@ class ContextManager:
         context = await self.get_context(channel, user_id, create_if_missing=False)
         if context:
             context.clear_messages()
-            # Re-add system message
-            system_prompt = self._system_prompt.replace(
-                "{{current_date}}", datetime.now().strftime("%Y-%m-%d")
-            ).replace(
-                "{{user_id}}", user_id
-            ).replace(
-                "{{channel}}", channel
-            )
+            # Re-add system message (with workspace if enabled)
+            system_prompt = self._get_system_prompt_for_context(user_id, channel)
             context.add_system_message(system_prompt)
             await self.update_context(context)
         return context
 
+    def get_messages_for_llm(
+        self,
+        context: ConversationContext,
+        context_window_tokens: int = 0,
+        count_tokens: Any = None,
+        prompt_mode: str = "full",
+    ) -> list[LLMMessage]:
+        """
+        Return messages normalized (merge consecutive same-role), limited by turns.
+        If prompt_mode is "minimal", system message is replaced with shorter prompt.
+        Does not mutate context (returns new list).
+        """
+        messages = list(context.get_messages())
+        if not messages:
+            return []
+        # Optionally use minimal system prompt to save tokens
+        if prompt_mode == "minimal":
+            minimal_prompt = self._build_system_prompt("minimal").replace(
+                "{{current_date}}", datetime.now().strftime("%Y-%m-%d")
+            ).replace("{{user_id}}", context.user_id).replace("{{channel}}", context.channel)
+            out = []
+            for m in messages:
+                if m.role == "system":
+                    out.append(LLMMessage(role="system", content=minimal_prompt))
+                else:
+                    out.append(m)
+            messages = out
+        # Turn normalization
+        messages = normalize_turns(messages)
+        # History limit by turns (and per-channel)
+        max_turns = getattr(self.settings.memory.short_term, "max_turns", 0) or 0
+        limit = get_history_limit_for_channel(context.channel, context.user_id)
+        if limit is not None:
+            max_turns = limit
+        if max_turns > 0:
+            messages = limit_history_by_turns(messages, max_turns)
+        return messages
+
     async def trim_context(self, context: ConversationContext) -> None:
         """
-        Trim a context to stay within token limits.
-
-        Keeps the system message and the most recent messages.
-        Optionally summarizes discarded messages and stores in vector memory.
+        Trim a context to stay within message and token limits (reserve tokens for compaction).
+        Uses per-context lock to serialize compaction. Optionally token-based when
+        compaction_trigger_tokens is set.
         """
+        key = self._get_context_key(context.channel, context.user_id, context.branch_id)
+        async with self._compaction_lock(key):
+            await self._trim_context_impl(context)
+
+    async def _trim_context_impl(self, context: ConversationContext) -> None:
         max_messages = self.settings.memory.short_term.max_messages
+        reserve = getattr(self.settings.memory.short_term, "compaction_reserve_tokens", 20_000)
+        trigger = getattr(self.settings.memory.short_term, "compaction_trigger_tokens", 0)
 
-        if len(context.messages) <= max_messages:
-            # Still persist after trim check (saves latest messages)
-            await self.save_context(context)
-            return
-
-        # Keep system message(s) and trim the rest
         system_messages = [m for m in context.messages if m.role == "system"]
         other_messages = [m for m in context.messages if m.role != "system"]
 
-        # Auto-summarize discarded messages before trimming (if enabled)
+        # Token-based target: if trigger set, trim until under (trigger - reserve)
+        target_tokens = 0
+        if trigger > 0 and reserve > 0 and self._llm_router:
+            count_fn = self._llm_router.count_tokens
+            target_tokens = max(0, trigger - reserve)
+            current = estimate_tokens_messages(system_messages + other_messages, count_fn)
+            if current <= target_tokens and len(context.messages) <= max_messages:
+                await self.save_context(context)
+                return
+
+        if len(context.messages) <= max_messages and target_tokens == 0:
+            await self.save_context(context)
+            return
+
         keep_count = max_messages - len(system_messages)
+        if target_tokens > 0 and self._llm_router:
+            count_fn = self._llm_router.count_tokens
+            # Reduce keep_count until estimated tokens under target
+            while keep_count > 1:
+                trimmed = other_messages[-keep_count:]
+                est = estimate_tokens_messages(system_messages + trimmed, count_fn)
+                if est <= target_tokens:
+                    break
+                keep_count = max(1, keep_count - 5)
+        else:
+            keep_count = max(1, keep_count)
+
         if (
             self.settings.memory.auto_summarize
             and self._summarizer
@@ -685,16 +789,10 @@ class ContextManager:
                 except Exception as e:
                     logger.debug("Auto-summarize on trim failed", error=str(e))
 
-        # Keep the most recent messages
-        keep_count = max_messages - len(system_messages)
         trimmed_messages = other_messages[-keep_count:] if keep_count > 0 else []
-
         context.messages = system_messages + trimmed_messages
         context.updated_at = datetime.now(timezone.utc)
-
-        # Persist after trimming
         await self.save_context(context)
-
         logger.debug(
             "Trimmed context",
             context_id=context.id,

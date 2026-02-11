@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
   Cpu,
@@ -12,8 +12,6 @@ import {
   CheckCircle2,
   XCircle,
   Activity,
-  Search,
-  MapPin,
   Zap,
   Server,
   Database,
@@ -21,7 +19,7 @@ import {
   DollarSign,
   Download,
 } from 'lucide-react';
-import { hudApi, systemApi, agentsApi, usageApi, exportApi } from '../services/api';
+import { hudApi, systemApi, usageApi, exportApi } from '../services/api';
 
 function VitalsCard({
   icon: Icon,
@@ -101,9 +99,24 @@ function SystemVitals() {
     );
   }
 
-  const cpuVal = vitals.cpu_percent ?? 0;
-  const memVal = vitals.memory_percent ?? 0;
-  const diskVal = vitals.disk_percent ?? 0;
+  const cpuVal = typeof vitals.cpu_percent === 'number' ? vitals.cpu_percent : 0;
+  const memVal = typeof vitals.memory_percent === 'number' ? vitals.memory_percent : 0;
+  const diskVal = typeof vitals.disk_percent === 'number' ? vitals.disk_percent : 0;
+  const llm = vitals.llm ?? {};
+  const anyLlmAvailable = llm.local === true || llm.cloud === true || llm.gemini === true || llm.openrouter === true || llm.nvidia === true;
+  const allLlmUnknown = [llm.local, llm.cloud, llm.gemini, llm.openrouter, llm.nvidia].every((v) => v === undefined || v === null);
+  const llmLabel = allLlmUnknown
+    ? 'Checking…'
+    : (llm.local && llm.cloud) ? 'Hybrid'
+    : llm.local ? 'Local' : llm.cloud ? 'Cloud'
+    : llm.gemini ? 'Gemini' : llm.openrouter ? 'OpenRouter'
+    : llm.nvidia ? 'NVIDIA' : 'Offline';
+  const llmSublabel = allLlmUnknown
+    ? '—'
+    : [llm.local && 'Local', llm.cloud && 'Cloud', llm.gemini && 'Gemini', llm.openrouter && 'OpenRouter', llm.nvidia && 'NVIDIA']
+        .filter(Boolean)
+        .map((l, i) => (i > 0 ? ` · ${l} ✓` : `${l} ✓`))
+        .join('') || 'Offline';
 
   return (
     <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
@@ -117,19 +130,20 @@ function SystemVitals() {
         icon={MemoryStick}
         label="Memory"
         value={memVal}
-        sublabel={`${vitals.memory_used_gb ?? 0} / ${vitals.memory_total_gb ?? 0} GB`}
+        sublabel={vitals.memory_total_gb != null ? `${vitals.memory_used_gb ?? 0} / ${vitals.memory_total_gb} GB` : undefined}
         status={memVal > 80 ? 'critical' : memVal > 60 ? 'warn' : 'good'}
       />
       <VitalsCard
         icon={HardDrive}
         label="Disk"
         value={diskVal}
+        sublabel={vitals.disk_total_gb != null ? `${vitals.disk_used_gb ?? 0} / ${vitals.disk_total_gb} GB` : undefined}
         status={diskVal > 90 ? 'critical' : diskVal > 75 ? 'warn' : 'good'}
       />
       <div className="rounded-2xl dashboard-card p-5 transition-all duration-300 ">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-theme-muted">
-            {vitals.llm?.local || vitals.llm?.cloud ? (
+            {anyLlmAvailable ? (
               <Wifi className="w-5 h-5 text-emerald-400" />
             ) : (
               <WifiOff className="w-5 h-5 text-amber-400" />
@@ -137,12 +151,8 @@ function SystemVitals() {
           </div>
           <div>
             <p className="text-xs font-medium text-theme-secondary uppercase tracking-wider">LLM</p>
-            <p className="text-sm font-semibold text-theme-primary mt-0.5">
-              {vitals.llm?.local && vitals.llm?.cloud ? 'Hybrid' : vitals.llm?.local ? 'Local' : vitals.llm?.cloud ? 'Cloud' : 'Offline'}
-            </p>
-            <p className="text-xs text-theme-secondary mt-0.5">
-              Local {vitals.llm?.local ? '✓' : '✗'} · Cloud {vitals.llm?.cloud ? '✓' : '✗'}
-            </p>
+            <p className="text-sm font-semibold text-theme-primary mt-0.5">{llmLabel}</p>
+            <p className="text-xs text-theme-secondary mt-0.5">{llmSublabel}</p>
           </div>
         </div>
       </div>
@@ -150,97 +160,8 @@ function SystemVitals() {
   );
 }
 
-function QuickActionCard({
-  icon: Icon,
-  label,
-  placeholder,
-  onRun,
-  iconColor,
-  buttonClass,
-}: {
-  icon: React.ElementType;
-  label: string;
-  placeholder: string;
-  onRun: (q: string) => Promise<unknown>;
-  iconColor: string;
-  buttonClass: string;
-}) {
-  const [query, setQuery] = useState('');
-  const runMutation = useMutation({
-    mutationFn: (q: string) => onRun(q),
-  });
-  const handleSubmit = () => {
-    if (!query.trim()) return;
-    runMutation.mutate(query);
-    setQuery('');
-  };
-
-  return (
-    <div className="rounded-2xl dashboard-card p-4 transition-all duration-300 ">
-      <div className="flex items-center gap-2 mb-3">
-        <Icon className={`w-4 h-4 ${iconColor}`} />
-        <span className="text-sm font-semibold text-theme-primary">{label}</span>
-      </div>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          placeholder={placeholder}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-          className="flex-1 px-4 py-2.5 rounded-xl glass-input text-sm focus:outline-none focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20 transition-all"
-        />
-        <button
-          onClick={handleSubmit}
-          disabled={!query.trim() || runMutation.isPending}
-          className={`px-4 py-2.5 rounded-xl font-medium text-sm flex items-center gap-2 transition-all disabled:opacity-50 ${buttonClass}`}
-        >
-          {runMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-          Run
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ResearchLauncher() {
-  const queryClient = useQueryClient();
-  return (
-    <QuickActionCard
-      icon={Search}
-      label="Research"
-      placeholder="Research a topic (Reddit, X, Web)..."
-      iconColor="text-blue-400"
-      buttonClass="bg-blue-500/20 hover:bg-blue-500/30 text-blue-400"
-      onRun={async (q) => {
-        const res = await agentsApi.run(q, 'research');
-        queryClient.invalidateQueries({ queryKey: ['hud-agents-full'] });
-        return res.data;
-      }}
-    />
-  );
-}
-
-function ItineraryLauncher() {
-  const queryClient = useQueryClient();
-  return (
-    <QuickActionCard
-      icon={MapPin}
-      label="Multi-City Itinerary"
-      placeholder="e.g. Paris, London, Tokyo"
-      iconColor="text-emerald-400"
-      buttonClass="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400"
-      onRun={async (q) => {
-        const res = await agentsApi.run(q, 'itinerary');
-        queryClient.invalidateQueries({ queryKey: ['hud-agents-full'] });
-        return res.data;
-      }}
-    />
-  );
-}
-
 function AgentPanel() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['hud-agents-full'],
     queryFn: async () => {
       const res = await hudApi.getAllAgentsFull();
@@ -249,9 +170,28 @@ function AgentPanel() {
     refetchInterval: 1500,
   });
 
-  const agents = data?.agents ?? [];
+  const agents = Array.isArray(data?.agents) ? data.agents : [];
 
-  if (isLoading) {
+  if (isError) {
+    return (
+      <div className="rounded-2xl dashboard-card p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 rounded-lg bg-theme-muted">
+            <Bot className="w-5 h-5 text-theme-secondary" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-theme-primary">Active Agents</h3>
+            <p className="text-xs text-theme-secondary">Real-time bot status</p>
+          </div>
+        </div>
+        <div className="rounded-xl border border-theme card-theme p-6 text-center">
+          <p className="text-sm text-theme-secondary">Unable to load agents</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading && agents.length === 0) {
     return (
       <div className="rounded-2xl dashboard-card p-6">
         <div className="flex items-center gap-3 mb-4">
@@ -296,7 +236,7 @@ function AgentPanel() {
           <Bot className="w-10 h-10 text-theme-secondary mx-auto mb-3" />
           <p className="text-sm font-medium text-theme-secondary">No agents running</p>
           <p className="text-xs text-theme-secondary mt-1 max-w-[240px] mx-auto">
-            Launch a research or itinerary task above to see parallel bots in action
+            Agents will appear here when tasks are running
           </p>
         </div>
       ) : (
@@ -371,9 +311,10 @@ function UsageCostWidget() {
     );
   }
 
-  const total = data.total_calls ?? 0;
-  const cost = data.cost_estimate_usd ?? 0;
-  const latency = data.avg_latency_ms ?? 0;
+  const totalCalls = Number(data?.total_calls) || 0;
+  const totalTokens = Number(data?.total_tokens) || 0;
+  const cost = Number(data?.cost_estimate_usd) || 0;
+  const latency = Number(data?.avg_latency_ms) || 0;
 
   return (
     <div className="rounded-2xl dashboard-card p-5 transition-all duration-300 ">
@@ -389,7 +330,11 @@ function UsageCostWidget() {
       <div className="space-y-2 text-sm">
         <div className="flex justify-between">
           <span className="text-theme-secondary">API calls</span>
-          <span className="font-medium text-theme-primary tabular-nums">{total}</span>
+          <span className="font-medium text-theme-primary tabular-nums">{totalCalls}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-theme-secondary">Tokens</span>
+          <span className="font-medium text-theme-primary tabular-nums">{totalTokens.toLocaleString()}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-theme-secondary">Est. cost</span>
@@ -450,7 +395,7 @@ function ExportButton() {
 }
 
 function QuickStats() {
-  const { data } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['system-status'],
     queryFn: async () => {
       const res = await systemApi.getStatus();
@@ -459,11 +404,12 @@ function QuickStats() {
     refetchInterval: 15000,
   });
 
+  const skills = data?.skills;
   const stats = [
-    { icon: Zap, label: 'Skills', value: data?.skills?.enabled_skills ?? 0 },
-    { icon: Calendar, label: 'Scheduled', value: data?.scheduled_jobs ?? 0 },
-    { icon: Database, label: 'Vector docs', value: data?.vector_memory?.document_count ?? 0 },
-    { icon: Plug, label: 'Plugins', value: data?.plugins ?? 0 },
+    { icon: Zap, label: 'Skills', value: typeof skills?.enabled_skills === 'number' ? skills.enabled_skills : 0 },
+    { icon: Calendar, label: 'Scheduled', value: typeof data?.scheduled_jobs === 'number' ? data.scheduled_jobs : 0 },
+    { icon: Database, label: 'Vector docs', value: typeof data?.vector_memory?.document_count === 'number' ? data.vector_memory.document_count : 0 },
+    { icon: Plug, label: 'Plugins', value: typeof data?.plugins === 'number' ? data.plugins : 0 },
   ];
 
   return (
@@ -477,23 +423,32 @@ function QuickStats() {
           <p className="text-xs text-theme-secondary">System overview</p>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        {stats.map(({ icon: Icon, label, value }) => (
-          <div key={label} className="flex items-center gap-3 p-3 rounded-xl card-theme">
-            <Icon className="w-4 h-4 text-theme-secondary" />
-            <div>
-              <p className="text-xs text-theme-secondary">{label}</p>
-              <p className="text-lg font-semibold text-theme-primary tabular-nums">{value}</p>
+      {isError ? (
+        <p className="text-sm text-theme-secondary">Unable to load stats</p>
+      ) : isLoading && !data ? (
+        <div className="flex items-center gap-2 text-theme-secondary">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span className="text-sm">Loading…</span>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          {stats.map(({ icon: Icon, label, value }) => (
+            <div key={label} className="flex items-center gap-3 p-3 rounded-xl card-theme">
+              <Icon className="w-4 h-4 text-theme-secondary" />
+              <div>
+                <p className="text-xs text-theme-secondary">{label}</p>
+                <p className="text-lg font-semibold text-theme-primary tabular-nums">{value}</p>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function ConversationTimeline() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['hud-timeline'],
     queryFn: async () => {
       const res = await hudApi.getTimeline();
@@ -502,9 +457,28 @@ function ConversationTimeline() {
     refetchInterval: 10000,
   });
 
-  const events = data?.events ?? [];
+  const events = Array.isArray(data?.events) ? data.events : [];
 
-  if (isLoading) {
+  if (isError) {
+    return (
+      <div className="rounded-2xl dashboard-card p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 rounded-lg bg-theme-muted">
+            <Calendar className="w-5 h-5 text-theme-secondary" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-theme-primary">Today's Activity</h3>
+            <p className="text-xs text-theme-secondary">Conversation timeline</p>
+          </div>
+        </div>
+        <div className="rounded-xl border border-theme card-theme p-6 text-center">
+          <p className="text-sm text-theme-secondary">Unable to load activity</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading && events.length === 0) {
     return (
       <div className="rounded-2xl dashboard-card p-6 animate-pulse">
         <div className="h-5 w-32 bg-theme-muted rounded mb-4" />
@@ -572,7 +546,7 @@ export default function Dashboard() {
             Dashboard
           </h1>
           <p className="text-theme-secondary mt-1 max-w-2xl">
-            Real-time system vitals, active agents, and JARVIS HUD. Monitor and launch research or itinerary tasks.
+            Real-time system vitals, active agents and usage tracking.
           </p>
         </div>
       </div>
@@ -584,14 +558,10 @@ export default function Dashboard() {
           <SystemVitals />
         </section>
 
-        {/* Quick actions + Agent panel */}
+        {/* Agent panel + Overview */}
         <section className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
-            <div className="grid sm:grid-cols-2 gap-4">
-              <ResearchLauncher />
-              <ItineraryLauncher />
-            </div>
-            <h2 className="text-sm font-semibold text-theme-secondary uppercase tracking-wider pt-2">Active Agents</h2>
+            <h2 className="text-sm font-semibold text-theme-secondary uppercase tracking-wider">Active Agents</h2>
             <AgentPanel />
           </div>
           <div className="space-y-4">

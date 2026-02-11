@@ -5,9 +5,11 @@ unknown errors. Can remediate code crashes when the main loop catches them.
 """
 
 import asyncio
+import hashlib
 import json
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -89,10 +91,21 @@ class SelfHealingService:
         self._task: asyncio.Task | None = None
         self._running = False
         self._patterns, self._pip_packages, self._llm_config = _load_remediations()
+        # Avoid calling LLM every interval when errors are unchanged (saves tokens/rate limits)
+        self._last_error_signature: str | None = None
+        self._last_llm_call_time: float = 0.0
+        self._llm_backoff_until: float = 0.0
+        self._same_error_skip_seconds = 300  # 5 min
+        self._backoff_429_seconds = 300
+        self._backoff_402_seconds = 900
 
     def set_llm_router(self, router: Any) -> None:
         """Set the LLM router for analyzing unknown errors."""
         self._llm_router = router
+
+    def update_config(self, enabled: bool, interval_seconds: int) -> None:
+        """Update interval and whether the periodic loop should run. Call start/stop from caller."""
+        self._check_interval = max(60, min(86400, interval_seconds))  # clamp 1 min to 24h
 
     async def start(self) -> None:
         """Start the periodic check loop."""
@@ -248,12 +261,24 @@ class SelfHealingService:
 
             # LLM fallback for error lines that didn't match any pattern
             unmatched_lines = [error_lines[i] for i in range(len(error_lines)) if i not in matched_lines]
+            llm_fallback_result: dict[str, Any] | None = None
             if self._llm_config.get("enabled") and self._llm_router and unmatched_lines:
-                llm_result = await self._llm_analyze_and_fix(unmatched_lines[-10:])
-                if llm_result:
-                    result["fixed"].extend(llm_result.get("fixed", []))
-                    result["failed"].extend(llm_result.get("failed", []))
-                    result["detected"].extend(llm_result.get("detected", []))
+                # Skip LLM if same errors as last check (saves tokens and avoids rate limits)
+                sig = hashlib.sha256("\n".join(unmatched_lines[-10:]).encode()).hexdigest()
+                if (
+                    self._last_error_signature == sig
+                    and (time.monotonic() - self._last_llm_call_time) < self._same_error_skip_seconds
+                ):
+                    logger.debug("Self-healing: skipping LLM (same errors as last check, wait %ss)", self._same_error_skip_seconds)
+                else:
+                    llm_fallback_result = await self._llm_analyze_and_fix(unmatched_lines[-10:])
+                    if llm_fallback_result:
+                        self._last_error_signature = sig
+                        self._last_llm_call_time = time.monotonic()
+                if llm_fallback_result:
+                    result["fixed"].extend(llm_fallback_result.get("fixed", []))
+                    result["failed"].extend(llm_fallback_result.get("failed", []))
+                    result["detected"].extend(llm_fallback_result.get("detected", []))
 
         except Exception as e:
             logger.error("Self-healing check failed", error=str(e), log_paths=[str(p) for p in log_paths])
@@ -274,6 +299,9 @@ class SelfHealingService:
     async def _llm_analyze_and_fix(self, error_lines: list[str]) -> dict[str, Any] | None:
         """Use LLM to analyze unknown errors and suggest fixes."""
         if not self._llm_router or not error_lines:
+            return None
+        if time.monotonic() < self._llm_backoff_until:
+            logger.debug("Self-healing: skipping LLM (backoff after rate/spend limit)")
             return None
 
         error_context = "\n".join(error_lines[-10:])[:3000]
@@ -352,7 +380,15 @@ Be conservative. Only suggest actions you are confident about (confidence >= 0.7
                     return {"fixed": [f"{action}: {msg}"], "detected": [data.get("reason", payload)]}
                 return {"failed": [f"{action}: {msg}"], "detected": [data.get("reason", payload)]}
         except Exception as e:
-            logger.warning("LLM self-healing failed", error=str(e))
+            err_str = str(e)
+            logger.warning("LLM self-healing failed", error=err_str)
+            # Back off on rate limit (429) or spend limit (402) to avoid burning tokens
+            if "429" in err_str or "Rate limit" in err_str:
+                self._llm_backoff_until = time.monotonic() + self._backoff_429_seconds
+                logger.info("Self-healing: LLM backoff %ss (rate limit)", self._backoff_429_seconds)
+            elif "402" in err_str or "spend limit" in err_str.lower() or "USD" in err_str:
+                self._llm_backoff_until = time.monotonic() + self._backoff_402_seconds
+                logger.info("Self-healing: LLM backoff %ss (spend limit)", self._backoff_402_seconds)
         return None
 
     async def _handle_code_edit(self, data: dict[str, Any], payload: Any) -> dict[str, Any] | None:
@@ -423,29 +459,37 @@ Be conservative. Only suggest actions you are confident about (confidence >= 0.7
             self._attempted.add(attempt_key)
             if result.approved:
                 applied, failed = [], []
-                for e in edits:
-                    success, msg = await self._apply_code_edit(
-                        e["file_path"], e.get("old_string", ""), e.get("new_string", "")
-                    )
-                    if success:
-                        applied.append(e["file_path"])
-                    else:
-                        failed.append(f"{e['file_path']}: {msg}")
-                status = "success" if not failed else ("partial" if applied else "failed")
-                if result.request_id and self._security_guardian:
-                    self._security_guardian.set_approval_outcome(
-                        result.request_id,
-                        {"status": status, "applied": applied, "failed": failed},
-                    )
-                if applied:
-                    logger.info("Self-healing (code_edit): applied", files=applied)
-                    if self._event_bus:
-                        await self._event_bus.emit("self_healing_fixed", {
-                            "action": "code_edit",
-                            "message": f"Applied fix to {', '.join(applied)}",
-                        }, source="self_healing")
-                if failed:
-                    logger.warning("Self-healing (code_edit): some failed", failed=failed)
+                try:
+                    for e in edits:
+                        success, msg = await self._apply_code_edit(
+                            e["file_path"], e.get("old_string", ""), e.get("new_string", "")
+                        )
+                        if success:
+                            applied.append(e["file_path"])
+                        else:
+                            failed.append(f"{e['file_path']}: {msg}")
+                    status = "success" if not failed else ("partial" if applied else "failed")
+                    if result.request_id and self._security_guardian:
+                        self._security_guardian.set_approval_outcome(
+                            result.request_id,
+                            {"status": status, "applied": applied, "failed": failed},
+                        )
+                    if applied:
+                        logger.info("Self-healing (code_edit): applied", files=applied)
+                        if self._event_bus:
+                            await self._event_bus.emit("self_healing_fixed", {
+                                "action": "code_edit",
+                                "message": f"Applied fix to {', '.join(applied)}",
+                            }, source="self_healing")
+                    if failed:
+                        logger.warning("Self-healing (code_edit): some failed", failed=failed)
+                except Exception as apply_err:
+                    logger.warning("Self-healing (code_edit): apply failed", error=str(apply_err))
+                    if result.request_id and self._security_guardian:
+                        self._security_guardian.set_approval_outcome(
+                            result.request_id,
+                            {"status": "error", "applied": [], "failed": [str(apply_err)]},
+                        )
             else:
                 logger.info("Self-healing (code_edit): user denied", files=files_str)
         except Exception as e:
@@ -455,18 +499,39 @@ Be conservative. Only suggest actions you are confident about (confidence >= 0.7
     async def _apply_code_edit(self, file_path: str, old_string: str, new_string: str) -> tuple[bool, str]:
         """Apply a string replacement in a file. Returns (success, message)."""
         base = Path(__file__).resolve().parent.parent.parent
-        path = (base / file_path).resolve()
+        # Normalize: strip leading segment if it equals project dir name (e.g. aria/auth.py -> auth.py)
+        parts = file_path.replace("\\", "/").strip("/").split("/")
+        if base.name and parts and parts[0].lower() == base.name.lower():
+            parts = parts[1:]
+        if not parts:
+            return False, "Invalid file path"
+        normalized = "/".join(parts)
+        path = (base / normalized).resolve()
         if not path.exists():
-            return False, f"File not found: {path}"
+            alt = (base / "src" / normalized).resolve()
+            if alt.exists() and str(alt).startswith(str(base)):
+                path = alt
+            else:
+                return False, f"File not found: {path}"
         if not str(path).startswith(str(base)):
             return False, f"File outside project: {path}"
         try:
             content = path.read_text(encoding="utf-8")
-            if old_string not in content:
-                return False, "old_string not found in file (content may have changed)"
-            new_content = content.replace(old_string, new_string, 1)
-            path.write_text(new_content, encoding="utf-8")
-            return True, "Edit applied"
+            if old_string in content:
+                new_content = content.replace(old_string, new_string, 1)
+                path.write_text(new_content, encoding="utf-8")
+                return True, "Edit applied"
+            # Fallback: try matching with flexible whitespace (LLM may have different spacing/newlines)
+            import re
+            escaped = re.escape(old_string)
+            # Replace escaped spaces and newlines/tabs with \s+ so we match any run of whitespace
+            pattern = re.sub(r"(\\\\ |\\\\n|\\\\t|\\\\r)+", r"\\\\s+", escaped)
+            match = re.search(pattern, content, re.DOTALL)
+            if match:
+                new_content = content[: match.start()] + new_string + content[match.end() :]
+                path.write_text(new_content, encoding="utf-8")
+                return True, "Edit applied (whitespace relaxed)"
+            return False, "old_string not found in file (content may have changed)"
         except Exception as e:
             return False, str(e)
 
@@ -496,6 +561,19 @@ Be conservative. Only suggest actions you are confident about (confidence >= 0.7
                 if proc.returncode == 0:
                     return True, f"Ran: {cmd}"
                 return False, stderr.decode("utf-8", errors="replace")[:300]
+            except Exception as e:
+                return False, str(e)
+        if prog == "touch" and len(parts) >= 2:
+            # Allow touch <path> to create an empty file under project (path = first arg only)
+            try:
+                base = Path(__file__).resolve().parent.parent.parent
+                path_arg = parts[1].lstrip("/")
+                target = (base / path_arg).resolve()
+                if not str(target).startswith(str(base)):
+                    return False, "Path outside project"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.touch()
+                return True, f"Created {target.name}"
             except Exception as e:
                 return False, str(e)
         return False, f"Command not in allowed set: {prog}"

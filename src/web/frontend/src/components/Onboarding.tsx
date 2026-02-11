@@ -1,10 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Bot, Key, Puzzle, CheckCircle2, Loader2, ArrowRight, ArrowLeft } from 'lucide-react';
 import { configApi } from '../services/api';
 
 const ONBOARDING_DONE_KEY = 'aria-onboarding-done';
+
+const SKILL_GROUPS: Record<string, { label: string; skills: string[] }> = {
+  Core: { label: 'Core', skills: ['filesystem', 'shell', 'browser', 'memory'] },
+  Media: { label: 'Media', skills: ['tts', 'stt', 'image', 'video', 'documents'] },
+  Communication: { label: 'Communication', skills: ['calendar', 'email', 'sms'] },
+  JARVIS: { label: 'JARVIS', skills: ['weather', 'news', 'finance', 'contacts', 'tracking', 'home', 'webhook', 'agent', 'research'] },
+  Integrations: { label: 'Integrations', skills: ['notion', 'todoist', 'linear', 'spotify'] },
+};
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -17,10 +25,16 @@ export default function Onboarding() {
     linear: { enabled: false, api_key: '' },
     spotify: { enabled: false, client_id: '', client_secret: '' },
   });
+  const skillsSyncedRef = useRef(false);
 
-  const { data: config, isLoading } = useQuery({
+  const { data: config, isLoading, isError, refetch } = useQuery({
     queryKey: ['config'],
-    queryFn: async () => (await configApi.get()).data as any,
+    queryFn: async () => {
+      const res = await configApi.get();
+      const data = res?.data;
+      if (data && typeof data === 'object') return data as Record<string, unknown>;
+      throw new Error('Invalid config response');
+    },
     retry: 2,
   });
 
@@ -45,29 +59,49 @@ export default function Onboarding() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['config'] }),
   });
 
-  const SKILL_GROUPS: Record<string, { label: string; skills: string[] }> = {
-    Core: { label: 'Core', skills: ['filesystem', 'shell', 'browser', 'memory'] },
-    Media: { label: 'Media', skills: ['tts', 'stt', 'image', 'video', 'documents'] },
-    Communication: { label: 'Communication', skills: ['calendar', 'email', 'sms'] },
-    JARVIS: { label: 'JARVIS', skills: ['weather', 'news', 'finance', 'contacts', 'tracking', 'home', 'webhook', 'agent', 'research'] },
-    Integrations: { label: 'Integrations', skills: ['notion', 'todoist', 'linear', 'spotify'] },
-  };
+  useEffect(() => {
+    if (!config || typeof config !== 'object' || skillsSyncedRef.current) return;
+    skillsSyncedRef.current = true;
+    const skillsConfig = config.skills && typeof config.skills === 'object' ? (config.skills as Record<string, boolean>) : {};
+    const keys = Object.values(SKILL_GROUPS).flatMap((g) => g.skills);
+    setSkills(Object.fromEntries(keys.map((k) => [k, skillsConfig[k] ?? false])));
+  }, [config]);
 
-  if (isLoading || !config) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-        <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 p-8" style={{ backgroundColor: 'var(--bg-primary)' }}>
+        <Loader2 className="w-10 h-10 text-blue-400 animate-spin" aria-hidden />
+        <p className="text-sm text-theme-secondary">Loading setup…</p>
       </div>
     );
   }
 
-  useEffect(() => {
-    if (!config) return;
-    const keys = Object.values(SKILL_GROUPS).flatMap((g) => g.skills);
-    setSkills((prev) =>
-      Object.keys(prev).length ? prev : Object.fromEntries(keys.map((k) => [k, config.skills?.[k] ?? false]))
+  if (isError || !config) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 p-8" style={{ backgroundColor: 'var(--bg-primary)' }}>
+        <p className="text-theme-primary font-medium">Couldn’t load configuration</p>
+        <p className="text-sm text-theme-secondary text-center max-w-md">
+          The server may be unavailable or you may need to log in again.
+        </p>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/settings')}
+            className="px-4 py-2 rounded-lg border border-theme text-theme-primary hover:bg-theme-muted text-sm font-medium"
+          >
+            Open Settings
+          </button>
+        </div>
+      </div>
     );
-  }, [config]);
+  }
 
   const handleSkillsSave = async () => {
     await skillsMutation.mutateAsync();
@@ -86,7 +120,7 @@ export default function Onboarding() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6" style={{ backgroundColor: 'var(--bg-primary)' }}>
+    <div className="min-h-[80vh] flex items-center justify-center p-6 w-full" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <div className="w-full max-w-2xl">
         <div className="text-center mb-10">
           <div className="w-14 h-14 mx-auto rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center mb-4">

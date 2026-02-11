@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..base import BaseSkill, SkillResult
+from ...utils.config import get_settings
 from ...utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -109,6 +110,29 @@ class AgentSkill(BaseSkill):
             description="List running and recent agent tasks. Use to check status of delegated work.",
             parameters={"type": "object", "properties": {"user_id": {"type": "string"}, "channel": {"type": "string"}}},
         )
+        self.register_capability(
+            name="delegate_subagent",
+            description=(
+                "Delegate a task to a specialist sub-agent and get the result back. "
+                "Use when you want a dedicated research, coding, or data agent to do one focused task. "
+                "The sub-agent runs to completion and returns its output to you."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "The task for the sub-agent to perform"},
+                    "agent_type": {
+                        "type": "string",
+                        "description": "Specialist type: research (find/summarize), coding (write/run code), data (analyze). Omit for auto-select.",
+                        "enum": ["research", "coding", "data"],
+                    },
+                    "label": {"type": "string", "description": "Optional label for this delegation (e.g. 'background check')"},
+                    "user_id": {"type": "string"},
+                    "channel": {"type": "string"},
+                },
+                "required": ["task"],
+            },
+        )
 
     async def execute(self, capability: str, **kwargs: Any) -> SkillResult:
         start = datetime.now(timezone.utc)
@@ -124,6 +148,34 @@ class AgentSkill(BaseSkill):
                     start,
                 )
             except Exception as e:
+                return self._error_result(str(e), start)
+
+        if capability == "delegate_subagent":
+            settings = get_settings()
+            if not getattr(getattr(settings, "agents", None), "subagents_enabled", True):
+                return self._error_result("Sub-agents are disabled in configuration", start)
+            task = kwargs.get("task", "")
+            if not task:
+                return self._error_result("task is required for delegate_subagent", start)
+            user_id = kwargs.get("user_id", "default")
+            channel = kwargs.get("channel", "")
+            agent_type = kwargs.get("agent_type")
+            if agent_type:
+                agent_type = {"research": "research", "coding": "coding", "data": "data"}.get(
+                    agent_type.lower(), agent_type
+                )
+            try:
+                result = await self._coordinator.delegate(
+                    task=task,
+                    agent_type=agent_type,
+                    user_id=user_id,
+                    channel=channel,
+                )
+                if result.success:
+                    return self._success_result(result.output or "Sub-agent completed.", start)
+                return self._error_result(result.error or result.output or "Sub-agent failed", start)
+            except Exception as e:
+                logger.error("delegate_subagent failed", error=str(e))
                 return self._error_result(str(e), start)
 
         task = kwargs.get("query") or kwargs.get("task", "")

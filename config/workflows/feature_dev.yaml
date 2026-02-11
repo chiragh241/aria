@@ -1,0 +1,29 @@
+# Feature development: plan → implement → verify
+# Drop in a feature request; get back a plan, implementation, and verification.
+id: feature-dev
+name: Feature development
+description: Plan, implement, and verify a feature request. Same steps every time — plan, then implement, then verify.
+
+steps:
+  - id: plan
+    agent_type: research
+    input: |
+      Create a short implementation plan for this request. List concrete steps and acceptance criteria.
+      Keep it focused and actionable.
+      Request: {{task}}
+
+  - id: implement
+    agent_type: coding
+    input: |
+      Implement the following plan. Write and run code or scripts as needed.
+      Plan:
+      {{step_0.output}}
+
+      Original request: {{task}}
+
+  - id: verify
+    agent_type: research
+    input: |
+      Verify the implementation meets the plan. Summarize what was done and any gaps or next steps.
+      Plan: {{step_0.output}}
+      Implementation result: {{step_1.output}}

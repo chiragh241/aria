@@ -27,13 +27,44 @@ class UsageEntry:
 
 # Approximate cost per 1M tokens (USD) - update as needed
 COST_PER_1M = {
+    # Anthropic
     ("anthropic", "claude-sonnet"): {"input": 3.0, "output": 15.0},
     ("anthropic", "claude-opus"): {"input": 15.0, "output": 75.0},
     ("anthropic", "claude-haiku"): {"input": 0.25, "output": 1.25},
     ("anthropic", "default"): {"input": 3.0, "output": 15.0},
+    # Local
     ("ollama", "default"): {"input": 0.0, "output": 0.0},
+    # OpenAI
+    ("openai", "gpt-4o"): {"input": 2.5, "output": 10.0},
+    ("openai", "gpt-4"): {"input": 30.0, "output": 60.0},
     ("openai", "default"): {"input": 2.0, "output": 6.0},
+    # OpenRouter (varies by model; use blended default)
+    ("openrouter", "default"): {"input": 1.0, "output": 2.0},
+    # Google Gemini
+    ("gemini", "default"): {"input": 0.35, "output": 1.05},
+    # NVIDIA NIM
+    ("nvidia", "default"): {"input": 0.0, "output": 0.0},
 }
+
+
+def _cost_rates_for(provider: str, model: str) -> dict[str, float]:
+    """Get input/output cost per 1M tokens for a provider+model. Normalizes model for lookup."""
+    key = (provider.lower(), "default")
+    if provider.lower() == "anthropic" and model:
+        m = (model or "").lower()
+        if "opus" in m:
+            key = ("anthropic", "claude-opus")
+        elif "haiku" in m:
+            key = ("anthropic", "claude-haiku")
+        elif "sonnet" in m or "claude-3" in m:
+            key = ("anthropic", "claude-sonnet")
+    elif provider.lower() == "openai" and model:
+        m = (model or "").lower()
+        if "gpt-4o" in m:
+            key = ("openai", "gpt-4o")
+        elif "gpt-4" in m:
+            key = ("openai", "gpt-4")
+    return COST_PER_1M.get((provider.lower(), (model or "").lower()), COST_PER_1M.get(key, {"input": 0, "output": 0}))
 
 
 class UsageTracker:
@@ -138,13 +169,10 @@ class UsageTracker:
             by_provider[e.provider]["latency_ms_total"] += e.latency_ms
 
         cost_estimate = 0.0
-        for prov, data in by_provider.items():
-            key = (prov, "default")
-            if prov == "anthropic":
-                key = (prov, "claude-sonnet")
-            rates = COST_PER_1M.get(key, COST_PER_1M.get((prov, "default"), {"input": 0, "output": 0}))
-            cost_estimate += (data["input_tokens"] / 1e6) * rates["input"]
-            cost_estimate += (data["output_tokens"] / 1e6) * rates["output"]
+        for e in self._entries:
+            rates = _cost_rates_for(e.provider, e.model)
+            cost_estimate += (e.input_tokens / 1e6) * rates["input"]
+            cost_estimate += (e.output_tokens / 1e6) * rates["output"]
 
         latencies = [e.latency_ms for e in self._entries if e.latency_ms > 0]
         avg_latency = sum(latencies) / len(latencies) if latencies else 0

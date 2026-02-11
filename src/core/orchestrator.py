@@ -7,6 +7,15 @@ from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from ..utils.config import get_settings
 from ..utils.logging import get_audit_logger, get_logger
+from .context_efficiency import (
+    apply_tool_result_cap_to_context_in_place,
+    estimate_tokens_messages,
+    has_oversized_tool_results,
+    is_likely_context_overflow_error,
+    proportional_max_tool_result_chars,
+    rag_head_tail_trim,
+    truncate_tool_result_text,
+)
 from .context_manager import ContextManager, ConversationContext
 from .events import get_event_bus
 from .llm_router import LLMMessage, LLMResponse, LLMRouter, Tool
@@ -112,6 +121,39 @@ class Orchestrator:
 
     def set_entity_extractor(self, ee: Any) -> None:
         self._entity_extractor = ee
+
+    def _get_context_window_tokens(self) -> int:
+        """Context window size for proportional truncation and compaction."""
+        return self.llm_router.get_context_window() if self.llm_router else 0
+
+    def _get_messages_for_llm(
+        self,
+        context: ConversationContext,
+        prompt_mode: str = "full",
+    ) -> list[LLMMessage]:
+        """Messages normalized and limited by turns; optionally minimal system prompt."""
+        ctx_window = self._get_context_window_tokens()
+        count_tokens = self.llm_router.count_tokens if self.llm_router else None
+        return self.context_manager.get_messages_for_llm(
+            context,
+            context_window_tokens=ctx_window,
+            count_tokens=count_tokens,
+            prompt_mode=prompt_mode,
+        )
+
+    def _trim_rag_combined(self, combined: str) -> str:
+        """Apply head+tail trim to RAG/injected context using config."""
+        max_chars = getattr(self.settings.memory, "rag_max_chars", 2500)
+        head_r = getattr(self.settings.memory, "rag_head_ratio", 0.7)
+        tail_r = getattr(self.settings.memory, "rag_tail_ratio", 0.2)
+        return rag_head_tail_trim(combined, max_chars, head_r, tail_r)
+
+    def _max_tool_result_chars(self) -> int:
+        """Proportional or fixed max chars for a single tool result."""
+        ctx_window = self._get_context_window_tokens()
+        if ctx_window > 0:
+            return proportional_max_tool_result_chars(ctx_window)
+        return getattr(self.settings.memory.short_term, "max_tool_result_chars", 4000)
 
     async def _extract_and_update_profile(
         self,
@@ -418,22 +460,36 @@ class Orchestrator:
             except Exception:
                 pass  # Non-critical
 
-        # Get relevant context from RAG if available
+        # Get relevant context from RAG if available (head+tail trim to avoid token bleed)
         rag_context = ""
         if self._rag_pipeline:
             try:
                 rag_results = await self._rag_pipeline.query(content, top_k=3)
                 if rag_results:
-                    rag_context = "\n\nRelevant context:\n" + "\n".join(
-                        f"- {r['content']}" for r in rag_results
-                    )
+                    parts = []
+                    for r in rag_results:
+                        c = (r.get("content") or "")[:1200]
+                        if c:
+                            parts.append(c)
+                    if parts:
+                        combined = "\n\n".join(parts)
+                        combined = self._trim_rag_combined(combined)
+                        rag_context = "\n\nRelevant context:\n" + combined
             except Exception as e:
                 logger.warning("RAG query failed", error=str(e))
 
-        # Build messages for LLM — inject any auto-extracted context
-        messages = context.get_messages()
+        # Use minimal system prompt when context is large to save tokens
+        prompt_mode = "full"
+        if self.llm_router:
+            est = estimate_tokens_messages(context.get_messages(), self.llm_router.count_tokens)
+            threshold = getattr(self.settings.memory.short_term, "compaction_trigger_tokens", 0) or 100_000
+            if threshold and est > threshold:
+                prompt_mode = "minimal"
+        # Build messages for LLM (normalized, turn-limited) — inject any auto-extracted context
+        messages = self._get_messages_for_llm(context, prompt_mode=prompt_mode)
         extra_context = rag_context + link_context + media_context
-        if extra_context:
+        if extra_context and messages:
+            messages = list(messages)
             messages[-1] = LLMMessage(
                 role="user",
                 content=messages[-1].content + extra_context,
@@ -490,6 +546,27 @@ class Orchestrator:
         # Determine task type for routing
         task_type = self._classify_task(content)
 
+        # Pre-compact if over token trigger
+        trigger = getattr(self.settings.memory.short_term, "compaction_trigger_tokens", 0) or 0
+        if trigger > 0 and self.llm_router:
+            est = estimate_tokens_messages(messages, self.llm_router.count_tokens)
+            if est > trigger:
+                await self.context_manager.trim_context(context)
+                messages = self._get_messages_for_llm(context)
+                if extra_context and messages:
+                    messages = list(messages)
+                    messages[-1] = LLMMessage(role="user", content=messages[-1].content + extra_context)
+                # Re-apply profile/sentiment to system if present
+                if self._user_profile_manager and self.settings.memory.user_profiles_enabled and messages and messages[0].role == "system":
+                    profile_context = self._user_profile_manager.get_context_for_llm(user_id)
+                    if profile_context:
+                        messages[0] = LLMMessage(role="system", content=messages[0].content + profile_context)
+                if self._sentiment_analyzer and self._personality_adapter and messages and messages[0].role == "system":
+                    sentiment = self._sentiment_analyzer.analyze(content, user_id)
+                    user_profile = (self._user_profile_manager.get_profile(user_id) if self._user_profile_manager else None)
+                    adapted = self._personality_adapter.adapt_system_prompt(messages[0].content, sentiment, channel, user_profile)
+                    messages[0] = LLMMessage(role="system", content=adapted)
+
         try:
             # Generate response with tools
             response = await self.llm_router.generate(
@@ -498,9 +575,10 @@ class Orchestrator:
                 task_type=task_type,
             )
 
-            # Handle tool calls if the LLM wants to use skills
-            max_iterations = 5
+            # Handle tool calls if the LLM wants to use skills (configurable cap)
+            max_iterations = getattr(self.settings.orchestrator, "max_tool_iterations", 15)
             iteration = 0
+            ctx_window = self._get_context_window_tokens()
             while response.tool_calls and iteration < max_iterations:
                 iteration += 1
                 # Add assistant message with tool calls to context
@@ -563,6 +641,8 @@ class Orchestrator:
                     try:
                         result = await self._execute_tool(tool_name, tool_args)
                         result_str = str(result.output if hasattr(result, 'output') else result)
+                        max_chars = self._max_tool_result_chars()
+                        result_str = truncate_tool_result_text(result_str, max_chars)
                         context.add_tool_result(tool_call_id=tool_id, content=result_str)
                         audit_logger.action_executed(
                             action_type=self._get_action_type_for_tool(tool_name),
@@ -580,7 +660,7 @@ class Orchestrator:
 
                 # Generate follow-up response with tool results
                 response = await self.llm_router.generate(
-                    messages=context.get_messages(),
+                    messages=self._get_messages_for_llm(context),
                     tools=tools,
                     task_type=task_type,
                 )
@@ -630,13 +710,47 @@ class Orchestrator:
             return final_content
 
         except Exception as e:
+            # Overflow retry: truncate oversized tool results and retry once
+            ctx_window = self._get_context_window_tokens()
+            if (
+                ctx_window > 0
+                and is_likely_context_overflow_error(e)
+                and has_oversized_tool_results(context.get_messages(), ctx_window)
+            ):
+                try:
+                    apply_tool_result_cap_to_context_in_place(context.messages, ctx_window)
+                    messages = self._get_messages_for_llm(context)
+                    if extra_context and messages:
+                        messages = list(messages)
+                        messages[-1] = LLMMessage(role="user", content=messages[-1].content + extra_context)
+                    response = await self.llm_router.generate(messages=messages, tools=tools, task_type=task_type)
+                    final_content = self._sanitize_response(response.content)
+                    context.add_assistant_message(final_content)
+                    await self.context_manager.trim_context(context)
+                    if self._vector_memory and self._vector_memory.available:
+                        try:
+                            await self._vector_memory.add_message(content=final_content, role="assistant", channel=channel, user_id=user_id)
+                        except Exception:
+                            pass
+                    await self._event_bus.emit("message_sent", {"channel": channel, "user_id": user_id, "response_preview": (final_content or "")[:100]}, source="orchestrator")
+                    audit_logger.log(event="message_responded", action_type="chat", user_id=user_id, channel=channel, details={"response_preview": (final_content or "")[:100]})
+                    await self._extract_and_update_profile(user_id, content, final_content)
+                    return final_content
+                except Exception as retry_e:
+                    logger.error("Chat overflow retry failed", error=str(retry_e))
+                    e = retry_e
             logger.error("Chat generation failed", error=str(e))
             audit_logger.action_failed(
                 action_type="chat",
                 error=str(e),
                 channel=channel,
             )
-            return f"I encountered an error processing your message: {str(e)}"
+            if ctx_window > 0 and is_likely_context_overflow_error(e):
+                return (
+                    "This conversation is quite long. Try starting a new chat, or ask me to summarize "
+                    "and we can continue in a fresh thread."
+                )
+            return "I ran into a problem processing your message. Please try again or rephrase; if it persists, try a new chat."
 
     async def _handle_message(self, message: QueuedMessage) -> OrchestratorResponse:
         """
@@ -681,7 +795,7 @@ class Orchestrator:
             await self.context_manager.trim_context(context)
             return OrchestratorResponse(content=response_content)
 
-        # Get relevant context from RAG if available
+        # Get relevant context from RAG if available (head+tail trim)
         rag_context = ""
         if self._rag_pipeline:
             try:
@@ -690,16 +804,22 @@ class Orchestrator:
                     top_k=3,
                 )
                 if rag_results:
-                    rag_context = "\n\nRelevant context:\n" + "\n".join(
-                        f"- {r['content']}" for r in rag_results
-                    )
+                    parts: list[str] = []
+                    for r in rag_results:
+                        c = (r.get("content") or "")[:1200]
+                        if c:
+                            parts.append(c)
+                    if parts:
+                        combined = "\n\n".join(parts)
+                        combined = self._trim_rag_combined(combined)
+                        rag_context = "\n\nRelevant context:\n" + combined
             except Exception as e:
                 logger.warning("RAG query failed", error=str(e))
 
-        # Build messages for LLM
-        messages = context.get_messages()
-        if rag_context:
-            # Inject RAG context into the last user message
+        # Build messages for LLM (normalized, turn-limited)
+        messages = self._get_messages_for_llm(context)
+        if rag_context and messages:
+            messages = list(messages)
             messages[-1] = LLMMessage(
                 role="user",
                 content=messages[-1].content + rag_context,
@@ -730,16 +850,17 @@ class Orchestrator:
 
             # If tools were executed, get a final response
             if tool_response.tool_results:
-                # Add tool results to context
+                max_chars = self._max_tool_result_chars()
                 for result in tool_response.tool_results:
+                    content = truncate_tool_result_text(str(result["result"]), max_chars)
                     context.add_tool_result(
                         tool_call_id=result["tool_call_id"],
-                        content=str(result["result"]),
+                        content=content,
                     )
 
                 # Generate final response with tool results
                 final_response = await self.llm_router.generate(
-                    messages=context.get_messages(),
+                    messages=self._get_messages_for_llm(context),
                     task_type=task_type,
                 )
                 response = final_response
@@ -968,6 +1089,29 @@ Just ask me what you need help with!"""
                 )
             )
 
+        # Workspace: let assistant update SOUL/USER/IDENTITY/AGENTS from conversation
+        from .workspace import get_workspace_dir
+        if get_workspace_dir():
+            tools.append(
+                Tool(
+                    name="update_workspace",
+                    description=(
+                        "Update a workspace file (SOUL, USER, IDENTITY, AGENTS) with user preferences or facts. "
+                        "Use when the user says to remember something for their profile or how the assistant should behave. "
+                        "file: soul | identity | user | agents. content: text to set (or append if append=true)."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "file": {"type": "string", "description": "Which file: soul, identity, user, or agents"},
+                            "content": {"type": "string", "description": "Text to write or append"},
+                            "append": {"type": "boolean", "description": "If true, append to existing content; else replace", "default": False},
+                        },
+                        "required": ["file", "content"],
+                    },
+                )
+            )
+
         # Add create_skill tool when learning is enabled
         if (
             self._skill_generator
@@ -1169,6 +1313,10 @@ Just ask me what you need help with!"""
         arguments: dict[str, Any],
     ) -> Any:
         """Execute a tool by name."""
+        # Workspace: update SOUL/USER/IDENTITY/AGENTS from conversation
+        if tool_name == "update_workspace":
+            return await self._execute_update_workspace(arguments)
+
         # Handle create_skill (auto-learning) before skill.capability routing
         if tool_name == "create_skill":
             return await self._execute_create_skill(arguments)
@@ -1233,6 +1381,13 @@ Just ask me what you need help with!"""
             path = await self._skill_generator.save(skill)
             if not path:
                 return {"success": False, "error": "Failed to save skill (test or approval may have blocked it)"}
+            if path.startswith("pending:"):
+                pending_id = path.replace("pending:", "", 1)
+                return {
+                    "success": True,
+                    "message": f"Skill '{name}' is pending approval (ID: {pending_id}). Approve it in Settings → Skills → Pending.",
+                    "pending_id": pending_id,
+                }
 
             # Reload into registry so it's available immediately
             if self._skill_registry:
@@ -1290,6 +1445,27 @@ Just ask me what you need help with!"""
         except Exception as e:
             logger.error("check_logs_and_heal failed", error=str(e))
             return {"success": False, "error": str(e)}
+
+    async def _execute_update_workspace(self, arguments: dict[str, Any]) -> Any:
+        """Update a workspace file (SOUL, USER, IDENTITY, AGENTS)."""
+        from .workspace import read_workspace_file, write_workspace_file
+        file_key = (arguments.get("file") or "").strip().lower()
+        content = (arguments.get("content") or "").strip()
+        append = bool(arguments.get("append", False))
+        user_id = arguments.get("user_id") or ""
+        if not content:
+            return {"success": False, "error": "content is required"}
+        fmap = {"soul": "SOUL.md", "identity": "IDENTITY.md", "user": "USER.md", "agents": "AGENTS.md"}
+        if file_key not in fmap:
+            return {"success": False, "error": "file must be one of: soul, identity, user, agents"}
+        fname = fmap[file_key]
+        if append:
+            existing = read_workspace_file(fname, user_id=user_id or None)
+            content = (existing or "").rstrip() + "\n\n" + content
+        ok = write_workspace_file(fname, content, user_id=user_id or None)
+        if not ok:
+            return {"success": False, "error": "Failed to write file"}
+        return {"success": True, "message": f"Updated {fname}."}
 
     def _sanitize_response(self, content: str) -> str:
         """Sanitize LLM response: strip raw tool-call JSON that leaked into text.
@@ -1469,14 +1645,15 @@ Just ask me what you need help with!"""
                 )
 
                 if context:
+                    content = truncate_tool_result_text(str(result), self._max_tool_result_chars())
                     context.add_tool_result(
                         tool_call_id=tool_call.get("id", ""),
-                        content=str(result),
+                        content=content,
                     )
 
                     # Generate follow-up response
                     response = await self.llm_router.generate(
-                        messages=context.get_messages(),
+                        messages=self._get_messages_for_llm(context),
                     )
 
                     context.add_assistant_message(response.content)
@@ -1575,7 +1752,7 @@ Just ask me what you need help with!"""
             yield response_content
             return
 
-        messages = context.get_messages()
+        messages = self._get_messages_for_llm(context)
         task_type = self._classify_task(content)
 
         full_response = ""

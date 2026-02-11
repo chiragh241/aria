@@ -1,0 +1,34 @@
+# Bug fix: triage → investigate → fix → verify
+# Paste a bug report; get back a fix with verification.
+id: bug-fix
+name: Bug fix
+description: Triage a bug, find root cause, implement fix, and verify. Deterministic steps — no skipping.
+
+steps:
+  - id: triage
+    agent_type: research
+    input: |
+      Triage this bug report. Summarize: what is the expected behavior, what actually happens, and what might be the cause (area of code, dependency, config)?
+      Bug report: {{task}}
+
+  - id: investigate
+    agent_type: research
+    input: |
+      Based on the triage, investigate and narrow down the root cause. If code is involved, identify likely locations or patterns.
+      Triage: {{step_0.output}}
+      Original report: {{task}}
+
+  - id: fix
+    agent_type: coding
+    input: |
+      Implement a fix based on the investigation. Write or modify code/scripts as needed. Keep the change minimal.
+      Investigation: {{step_1.output}}
+      Triage: {{step_0.output}}
+      Bug: {{task}}
+
+  - id: verify
+    agent_type: research
+    input: |
+      Verify the fix addresses the bug. Summarize what was changed and how it resolves the issue. Note any remaining risks.
+      Fix result: {{step_2.output}}
+      Original bug: {{task}}

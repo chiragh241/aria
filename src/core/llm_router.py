@@ -612,12 +612,26 @@ class OpenRouterClient(BaseLLMClient):
         model: str = "anthropic/claude-3.5-sonnet",
         max_tokens: int = 4096,
         timeout: int = 120,
+        use_free_models: bool = False,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.max_tokens = max_tokens
         self.timeout = timeout
+        self.use_free_models = use_free_models
         self._client: Any = None
+
+    def _model_for_request(self) -> str:
+        """Model ID to send to API. Free tier uses openrouter/free (with reasoning)."""
+        if self.use_free_models:
+            return "openrouter/free"
+        return self.model
+
+    def _extra_body(self) -> dict[str, Any]:
+        """Extra body for OpenRouter. Enable reasoning when using free tier."""
+        if self.use_free_models:
+            return {"reasoning": {"enabled": True}}
+        return {}
 
     def _get_client(self) -> Any:
         if self._client is None:
@@ -679,11 +693,14 @@ class OpenRouterClient(BaseLLMClient):
         client = self._get_client()
         openai_messages = self._messages_to_openai(messages)
         kwargs_call: dict[str, Any] = {
-            "model": self.model,
+            "model": self._model_for_request(),
             "messages": openai_messages,
             "temperature": temperature,
             "max_tokens": max_tokens or self.max_tokens,
         }
+        extra = self._extra_body()
+        if extra:
+            kwargs_call["extra_body"] = extra
         if tools:
             kwargs_call["tools"] = self._tools_to_openai(tools)
             kwargs_call["tool_choice"] = "auto"
@@ -743,12 +760,15 @@ class OpenRouterClient(BaseLLMClient):
         client = self._get_client()
         openai_messages = self._messages_to_openai(messages)
         kwargs_call: dict[str, Any] = {
-            "model": self.model,
+            "model": self._model_for_request(),
             "messages": openai_messages,
             "temperature": temperature,
             "max_tokens": max_tokens or self.max_tokens,
             "stream": True,
         }
+        extra = self._extra_body()
+        if extra:
+            kwargs_call["extra_body"] = extra
         if tools:
             kwargs_call["tools"] = self._tools_to_openai(tools)
             kwargs_call["tool_choice"] = "auto"
@@ -762,11 +782,15 @@ class OpenRouterClient(BaseLLMClient):
         """Check if OpenRouter API is accessible."""
         try:
             client = self._get_client()
-            await client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": "Hi"}],
-                max_tokens=5,
-            )
+            kwargs: dict[str, Any] = {
+                "model": self._model_for_request(),
+                "messages": [{"role": "user", "content": "Hi"}],
+                "max_tokens": 5,
+            }
+            extra = self._extra_body()
+            if extra:
+                kwargs["extra_body"] = extra
+            await client.chat.completions.create(**kwargs)
             return True
         except Exception:
             return False
@@ -1084,6 +1108,9 @@ class LLMRouter:
                     model=self.settings.llm.openrouter.model,
                     max_tokens=self.settings.llm.openrouter.max_tokens,
                     timeout=self.settings.llm.openrouter.timeout,
+                    use_free_models=getattr(
+                        self.settings.llm.openrouter, "use_free_models", False
+                    ),
                 )
         return self._openrouter_client
 
@@ -1107,6 +1134,14 @@ class LLMRouter:
             return len(self._tokenizer.encode(text))
         # Fallback: rough estimate
         return len(text) // 4
+
+    def get_context_window(self, provider: str | None = None, model_id: str | None = None) -> int:
+        """Return effective context window in tokens (for proportional truncation, compaction)."""
+        return getattr(
+            self.settings.llm.routing,
+            "context_window_default",
+            200_000,
+        )
 
     def classify_complexity(
         self,
@@ -1278,7 +1313,58 @@ class LLMRouter:
         if self.local_client and self._local_available is not False:
             return self.local_client, LLMProvider.OLLAMA
 
-        raise RuntimeError("No LLM provider available")
+        # Last resort: use any configured provider even if health check failed
+        # (e.g. NVIDIA-only setup; health check may have been transient)
+        if self.gemini_client:
+            return self.gemini_client, LLMProvider.GEMINI
+        if self.openrouter_client:
+            return self.openrouter_client, LLMProvider.OPENROUTER
+        if self.nvidia_client:
+            return self.nvidia_client, LLMProvider.NVIDIA
+        if self.cloud_client:
+            return self.cloud_client, LLMProvider.ANTHROPIC
+        if self.local_client:
+            return self.local_client, LLMProvider.OLLAMA
+
+        raise RuntimeError(
+            "No LLM provider available. Check that your chosen provider (e.g. NVIDIA NIM) "
+            "is enabled in config and its API key is set (e.g. NVIDIA_API_KEY in .env). "
+            "Restart Aria after setup so config and env are loaded."
+        )
+
+    async def _generate_with_retry(
+        self,
+        client: Any,
+        messages: list[LLMMessage],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        max_attempts: int = 3,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Call client.generate with retries on 429/502/503."""
+        last_error: Exception | None = None
+        for attempt in range(max_attempts):
+            try:
+                return await client.generate(
+                    messages=messages,
+                    tools=tools,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs,
+                )
+            except Exception as e:
+                last_error = e
+                msg = str(e).lower()
+                if attempt < max_attempts - 1 and (
+                    "429" in msg or "502" in msg or "503" in msg or "rate limit" in msg
+                ):
+                    delay = 2**attempt
+                    logger.warning("LLM request failed, retrying", attempt=attempt + 1, delay_s=delay, error=msg[:100])
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+        raise last_error or RuntimeError("generate failed")
 
     async def generate(
         self,
@@ -1332,7 +1418,8 @@ class LLMRouter:
         try:
             import time
             t0 = time.perf_counter()
-            response = await client.generate(
+            response = await self._generate_with_retry(
+                client,
                 messages=messages,
                 tools=tools,
                 temperature=temperature,

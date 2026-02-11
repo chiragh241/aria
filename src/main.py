@@ -16,8 +16,12 @@ from typing import Any, Optional
 
 from dotenv import load_dotenv
 
-# Load .env BEFORE any other imports that read os.environ or settings
-load_dotenv(dotenv_path=Path("." ) / ".env", override=True)
+# Load .env BEFORE any other imports that read os.environ or settings.
+# Try cwd first, then project root (so API keys are found regardless of run directory).
+_env_cwd = Path(".").resolve() / ".env"
+_env_project = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=_env_cwd, override=True)
+load_dotenv(dotenv_path=_env_project, override=False)  # don't override if cwd already had it
 
 import structlog
 import uvicorn
@@ -152,6 +156,23 @@ class AriaApplication:
         self.llm_router = LLMRouter()
         await self.llm_router.initialize()
 
+        # Workspace: ensure templates exist, then optionally auto-bootstrap so context load gets filled files
+        from src.core.workspace import ensure_workspace_templates, is_bootstrap_needed
+        ensure_workspace_templates()
+        if getattr(getattr(self.settings, "workspace", None), "bootstrap_on_first_run", False) and is_bootstrap_needed():
+            from src.core.workspace_bootstrap import run_bootstrap_sync
+            run_bootstrap_sync(
+                llm_router=None,
+                use_llm=False,
+                answers={
+                    "user_name": "User",
+                    "assistant_name": self.settings.aria.name,
+                    "assistant_role": "personal AI assistant",
+                    "tone": "concise and helpful",
+                    "work_habits": "ask before external actions",
+                },
+            )
+
         self.context_manager = ContextManager()
 
         # Phase 1: User profile, entity extraction, summarizer
@@ -194,8 +215,8 @@ class AriaApplication:
 
         # Wire skill generator for auto-learning
         from src.skills.generator import SkillGenerator
-        skill_generator = SkillGenerator(llm_router=self.llm_router)
-        self.orchestrator.set_skill_generator(skill_generator)
+        self.skill_generator = SkillGenerator(llm_router=self.llm_router)
+        self.orchestrator.set_skill_generator(self.skill_generator)
 
         # Vector memory will be wired after initialization below
 
@@ -233,9 +254,10 @@ class AriaApplication:
         if self.vector_memory and self.vector_memory.available:
             self.orchestrator.set_vector_memory(self.vector_memory)
 
-        # Wire context manager summarizer and vector memory for auto-summarize on trim
+        # Wire context manager summarizer, vector memory, and LLM router (for token/compaction)
         self.context_manager.set_summarizer(self.conversation_summarizer)
         self.context_manager.set_vector_memory(self.vector_memory)
+        self.context_manager.set_llm_router(self.llm_router)
 
         # Wire Phase 1 & 5 components to orchestrator
         self.orchestrator.set_user_profile_manager(self.user_profile_manager)
@@ -297,12 +319,15 @@ class AriaApplication:
             context_skill.set_coordinator(self.agent_coordinator)
             context_skill.set_context_manager(self.context_manager)
 
-        # Workflow engine for skill chaining
+        # Workflow engine for skill chaining and named workflows
         from src.core.workflow_engine import WorkflowEngine
+        from src.core.workflow_named import NamedWorkflowRunner
         workflow_engine = WorkflowEngine(skill_registry=self.skill_registry)
+        named_workflow_runner = NamedWorkflowRunner(agent_coordinator=self.agent_coordinator)
         workflow_skill = self.skill_registry.get_skill("workflow")
         if workflow_skill:
             workflow_skill.set_engine(workflow_engine)
+            workflow_skill.set_named_workflow_runner(named_workflow_runner)
 
         # Initialize channels
         logger.info("Initializing channels...")
@@ -329,6 +354,8 @@ class AriaApplication:
         self.app.state.proactive_engine = self.proactive_engine
         self.app.state.agent_coordinator = self.agent_coordinator
         self.app.state.user_profile_manager = self.user_profile_manager
+        self.app.state.self_healing_service = self.self_healing_service
+        self.app.state.skill_generator = getattr(self, "skill_generator", None)
 
         logger.info("Aria initialization complete")
 
@@ -978,6 +1005,11 @@ def run():
         help="Run the interactive setup wizard",
     )
     parser.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="Run workspace bootstrap (Q&A + generate SOUL/USER/IDENTITY/AGENTS .md files)",
+    )
+    parser.add_argument(
         "--skip-setup",
         action="store_true",
         help="Skip setup wizard (used during restart)",
@@ -1006,7 +1038,7 @@ def run():
     parser.add_argument(
         "--dev",
         action="store_true",
-        help="Dev mode: spawn Vite dev server for frontend hot reload (use http://localhost:3000)",
+        help="Dev mode: spawn Vite dev server for frontend hot reload (open http://localhost:8080)",
     )
     args = parser.parse_args()
 
@@ -1015,7 +1047,7 @@ def run():
     if args.dev:
         import os
         import subprocess
-        os.environ["ARIA_DEV"] = "1"  # Signal to open browser on port 3000
+        os.environ["ARIA_DEV"] = "1"  # Signal to open browser on port 8080 (Vite dev server)
         args.local = True  # Skip Docker so backend runs
         frontend_dir = Path(__file__).resolve().parent / "web" / "frontend"
         if (frontend_dir / "package.json").exists():
@@ -1036,6 +1068,28 @@ def run():
         # Reload settings so deployment_mode from the freshly written config is used
         from src.utils.config import reload_settings
         reload_settings()
+
+    # --bootstrap: workspace bootstrap (Q&A + generate SOUL/USER/IDENTITY/AGENTS)
+    if args.bootstrap:
+        async def _bootstrap_with_llm():
+            from src.core.llm_router import LLMRouter
+            from src.core.workspace import is_bootstrap_needed
+            from src.core.workspace_bootstrap import run_bootstrap
+            if not is_bootstrap_needed():
+                return False
+            llm = LLMRouter()
+            try:
+                await llm.initialize()
+            except Exception:
+                llm = None
+            return await run_bootstrap(llm_router=llm, use_llm=bool(llm))
+
+        if not is_bootstrap_needed():
+            print("Workspace already bootstrapped. Edit data/workspace/*.md to change content.")
+            sys.exit(0)
+        ok = asyncio.run(_bootstrap_with_llm())
+        print("Bootstrap done." if ok else "Bootstrap skipped or failed.")
+        sys.exit(0)
 
     # --daemon flag: Daemon/service management
     import os

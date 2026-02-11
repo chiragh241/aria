@@ -83,11 +83,29 @@ class ConfigUpdate(BaseModel):
     data: dict[str, Any]
 
 
+class WorkspaceFileUpdate(BaseModel):
+    """Update content of a workspace file (SOUL, IDENTITY, USER, AGENTS)."""
+    content: str
+    user_id: Optional[str] = None  # For USER.md: write to users/<user_id>/USER.md
+
+
+class WorkspaceBootstrapRequest(BaseModel):
+    """Optional pre-filled answers for non-interactive bootstrap."""
+    answers: Optional[dict[str, str]] = None  # user_name, assistant_name, assistant_role, tone, work_habits
+
+
 class KeyValidation(BaseModel):
     """API key validation request."""
     key_type: str  # "anthropic" | "brave" | "slack_bot" | "slack_app"
     key_value: str
     extra: dict[str, str] | None = None
+
+
+class TalkCycleRequest(BaseModel):
+    """Request for one talk cycle: send transcript or audio, get reply text and optional TTS."""
+    transcript: Optional[str] = None
+    audio_base64: Optional[str] = None
+    audio_format: Optional[str] = None  # e.g. "mp3", "wav"
 
 
 # ── Security ──────────────────────────────────────────────────────────────────
@@ -179,6 +197,67 @@ def create_app(
     @api.get("/auth/me")
     async def get_me(user_id: str = Depends(get_current_user)):
         return {"user_id": user_id}
+
+    @api.get("/health")
+    async def health(request: Request):
+        """Health check for load balancers and monitoring. Returns 200 with component status."""
+        status = {"ok": True, "orchestrator": False, "workspace": False, "vector_memory": False}
+        if getattr(request.app.state, "orchestrator", None):
+            status["orchestrator"] = True
+        from ..core.workspace import get_workspace_dir
+        if get_workspace_dir():
+            status["workspace"] = True
+        vm = getattr(request.app.state, "vector_memory", None)
+        if vm and getattr(vm, "available", False):
+            status["vector_memory"] = True
+        return status
+
+    @api.get("/audit/export")
+    async def audit_export(
+        request: Request,
+        from_date: Optional[str] = Query(None, description="ISO date or datetime (inclusive)"),
+        to_date: Optional[str] = Query(None, description="ISO date or datetime (inclusive)"),
+        limit: int = Query(5000, le=20000),
+        user_id: str = Depends(get_current_user),
+    ):
+        """Export audit log entries as JSON for the given date range."""
+        from datetime import datetime as dt, timezone
+        audit = getattr(request.app.state, "audit_logger", None)
+        if not audit or not hasattr(audit, "query"):
+            raise HTTPException(status_code=503, detail="Audit logger not available")
+        start_time = None
+        end_time = None
+        if from_date:
+            try:
+                start_time = dt.fromisoformat(from_date.replace("Z", "+00:00"))
+                if start_time.tzinfo is None:
+                    start_time = start_time.replace(tzinfo=timezone.utc)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="from_date must be ISO format")
+        if to_date:
+            try:
+                end_time = dt.fromisoformat(to_date.replace("Z", "+00:00"))
+                if end_time.tzinfo is None:
+                    end_time = end_time.replace(tzinfo=timezone.utc)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="to_date must be ISO format")
+        entries = await audit.query(start_time=start_time, end_time=end_time, limit=limit)
+        return {
+            "count": len(entries),
+            "entries": [
+                {
+                    "id": e.id,
+                    "timestamp": e.timestamp.isoformat(),
+                    "event": e.event,
+                    "action_type": e.action_type,
+                    "user_id": e.user_id,
+                    "channel": e.channel,
+                    "status": e.status,
+                    "details": e.details,
+                }
+                for e in entries
+            ],
+        }
 
     @api.post("/log/event")
     async def log_client_event(
@@ -373,6 +452,130 @@ def create_app(
             return {"focus_mode": False}
         return {"focus_mode": engine.is_focus_mode(user_id)}
 
+    # -- Webhooks (inbound, token auth) --
+
+    @api.post("/webhooks/gmail")
+    async def webhook_gmail(request: Request):
+        """
+        Inbound webhook for Gmail Pub/Sub push. Delivers email summary as a user message to the assistant.
+        Configure webhooks.gmail in settings (enabled, token, deliver_user_id) or set WEBHOOK_GMAIL_TOKEN.
+        """
+        settings = get_settings()
+        gmail_cfg = getattr(settings, "webhooks", None) and getattr(settings.webhooks, "gmail", None)
+        if not gmail_cfg:
+            gmail_cfg = {"enabled": False, "token": os.environ.get("WEBHOOK_GMAIL_TOKEN", ""), "deliver_user_id": "webhook"}
+        else:
+            gmail_cfg = gmail_cfg if isinstance(gmail_cfg, dict) else gmail_cfg.model_dump()
+        if not gmail_cfg.get("enabled"):
+            raise HTTPException(status_code=404, detail="Gmail webhook not enabled")
+        token = gmail_cfg.get("token") or os.environ.get("WEBHOOK_GMAIL_TOKEN", "")
+        if not token:
+            raise HTTPException(status_code=500, detail="Gmail webhook token not configured")
+        # Accept token in header or query
+        provided = request.headers.get("x-gog-token") or request.headers.get("x-webhook-token") or request.query_params.get("token")
+        if not provided or provided != token:
+            raise HTTPException(status_code=401, detail="Invalid webhook token")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        content = body.get("message")
+        if not content and body.get("messages"):
+            msgs = body["messages"]
+            first = msgs[0] if isinstance(msgs[0], dict) else {}
+            content = "New email from {}\nSubject: {}\n{}\n{}".format(
+                first.get("from", "?"),
+                first.get("subject", ""),
+                first.get("snippet", ""),
+                first.get("body", ""),
+            )
+        if not content:
+            raise HTTPException(status_code=400, detail="Provide 'message' or 'messages' in body")
+        user_id = gmail_cfg.get("deliver_user_id", "webhook")
+        if not app.state.orchestrator:
+            raise HTTPException(status_code=503, detail="Orchestrator not available")
+        response_content = await app.state.orchestrator.chat(
+            channel="web", user_id=user_id, content=content
+        )
+        return {"delivered": True, "response_preview": (response_content or "")[:200]}
+
+    # -- Talk (voice cycle: transcript/audio in → text + optional TTS out) --
+
+    @api.post("/talk/cycle")
+    async def talk_cycle(
+        request: TalkCycleRequest,
+        user_id: str = Depends(get_current_user),
+    ):
+        """
+        One turn of talk mode: send transcript or audio; get assistant text and optional TTS audio.
+        """
+        if not app.state.orchestrator:
+            raise HTTPException(status_code=503, detail="Orchestrator not available")
+        transcript = request.transcript
+        if not transcript and request.audio_base64:
+            # Run STT
+            reg = getattr(app.state, "skill_registry", None)
+            if not reg:
+                raise HTTPException(status_code=503, detail="Skill registry not available for STT")
+            stt_skill = reg.get_skill("stt")
+            if not stt_skill:
+                raise HTTPException(status_code=503, detail="STT skill not available")
+            import base64
+            import tempfile
+            data = base64.b64decode(request.audio_base64)
+            fmt = (request.audio_format or "wav").lower()
+            with tempfile.NamedTemporaryFile(suffix=f".{fmt}", delete=False) as f:
+                f.write(data)
+                path = f.name
+            try:
+                result = await stt_skill.execute("transcribe_bytes", audio_data=request.audio_base64, format=fmt)
+                transcript = (result.output or {}).get("text") or str(result.output or "")
+            finally:
+                try:
+                    os.unlink(path)
+                except Exception:
+                    pass
+        if not transcript:
+            raise HTTPException(status_code=400, detail="Provide transcript or audio_base64")
+        response_text = await app.state.orchestrator.chat(
+            channel="web", user_id=user_id, content=transcript
+        )
+        tts_base64 = None
+        reg = getattr(app.state, "skill_registry", None)
+        if reg and response_text:
+            tts_skill = reg.get_skill("tts")
+            if tts_skill:
+                try:
+                    import base64
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                        out_path = f.name
+                    try:
+                        res = await tts_skill.execute("speak", text=response_text, output_path=out_path)
+                        if res.success and Path(out_path).exists():
+                            tts_base64 = base64.b64encode(Path(out_path).read_bytes()).decode("ascii")
+                    finally:
+                        try:
+                            os.unlink(out_path)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.warning("talk_cycle TTS failed", error=str(e))
+        return {"text": response_text, "tts_base64": tts_base64}
+
+    # -- Voice (TwiML for Twilio / voice calls) --
+
+    @api.get("/voice/twiml")
+    async def voice_twiml(message: str = Query("", description="Text for Twilio to speak")):
+        """
+        TwiML endpoint for Twilio: when a call connects, Twilio GETs this URL with ?message=...
+        and speaks the message. Use as voice_call.twiml_base_url (e.g. https://your-server/api/voice/twiml).
+        """
+        from fastapi.responses import Response
+        text = (message or "No message.").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Say>{text}</Say></Response>'
+        return Response(content=xml, media_type="application/xml")
+
     # -- Approvals --
 
     @api.get("/approvals/pending")
@@ -410,11 +613,12 @@ def create_app(
         )
         outcome = None
         if processed and request.approved:
-            for _ in range(30):
-                await asyncio.sleep(0.5)
+            await asyncio.sleep(0.1)  # yield so approval callback can run and set outcome
+            for _ in range(60):
                 outcome = app.state.security_guardian.pop_approval_outcome(request.approval_id)
                 if outcome is not None:
                     break
+                await asyncio.sleep(0.5)
         return {"processed": processed, "outcome": outcome}
 
     # -- Skills --
@@ -433,6 +637,25 @@ def create_app(
         if not skill:
             raise HTTPException(status_code=404, detail="Skill not found")
         return skill.to_dict()
+
+    @api.get("/skills/pending")
+    async def list_pending_skills(user_id: str = Depends(get_current_user)):
+        """List skills waiting for approval (when require_approval is enabled)."""
+        gen = getattr(app.state, "skill_generator", None)
+        if not gen or not hasattr(gen, "list_pending_skills"):
+            return {"pending": []}
+        return {"pending": gen.list_pending_skills()}
+
+    @api.post("/skills/pending/{pending_id}/approve")
+    async def approve_pending_skill(pending_id: str, user_id: str = Depends(get_current_user)):
+        """Approve a pending skill and move it to learned skills (reload may be required)."""
+        gen = getattr(app.state, "skill_generator", None)
+        if not gen or not hasattr(gen, "approve_pending_skill"):
+            raise HTTPException(status_code=503, detail="Skill generator not available")
+        path = gen.approve_pending_skill(pending_id)
+        if not path:
+            raise HTTPException(status_code=404, detail="Pending skill not found or approval failed")
+        return {"approved": True, "path": path, "message": "Skill approved. Restart or reload skills to use it."}
 
     @api.post("/skills/toggle")
     async def toggle_skill(request: SkillToggle, user_id: str = Depends(get_current_user)):
@@ -475,6 +698,12 @@ def create_app(
                 "whatsapp_enabled": settings.channels.whatsapp.enabled,
                 "web_enabled": settings.channels.web.enabled,
             },
+            "orchestrator": {
+                "max_tool_iterations": getattr(settings.orchestrator, "max_tool_iterations", 15),
+            },
+            "workspace": {
+                "enabled": getattr(getattr(settings, "workspace", None), "enabled", True),
+            },
         }
 
     @api.post("/settings")
@@ -512,6 +741,7 @@ def create_app(
                 "gemini_key_set": bool(env.get("GOOGLE_API_KEY")),
                 "openrouter_enabled": cfg.get("llm", {}).get("openrouter", {}).get("enabled", False),
                 "openrouter_model": cfg.get("llm", {}).get("openrouter", {}).get("model", "anthropic/claude-3.5-sonnet"),
+                "openrouter_use_free": cfg.get("llm", {}).get("openrouter", {}).get("use_free_models", False),
                 "openrouter_key_set": bool(env.get("OPENROUTER_API_KEY")),
                 "nvidia_enabled": cfg.get("llm", {}).get("nvidia", {}).get("enabled", False),
                 "nvidia_model": cfg.get("llm", {}).get("nvidia", {}).get("model", "moonshotai/kimi-k2.5"),
@@ -558,7 +788,11 @@ def create_app(
             "memory": {
                 "knowledge_graph_enabled": cfg.get("memory", {}).get("knowledge_graph", {}).get("enabled", True),
                 "knowledge_graph_provider": cfg.get("memory", {}).get("knowledge_graph", {}).get("provider", "cognee"),
-                "knowledge_graph_auto_process_after_ingest": cfg.get("memory", {}).get("knowledge_graph", {}).get("auto_process_after_ingest", False),
+                "knowledge_graph_auto_process_after_ingest": cfg.get("memory", {}).get("knowledge_graph", {}).get("auto_process_after_ingest", True),
+            },
+            "proactive": {
+                "self_healing_enabled": cfg.get("proactive", {}).get("self_healing_enabled", False),
+                "self_healing_check_interval_seconds": cfg.get("proactive", {}).get("self_healing_check_interval_seconds", 300),
             },
         }
 
@@ -603,6 +837,8 @@ def create_app(
             cfg["llm"]["openrouter"]["enabled"] = d["openrouter_enabled"]
         if "openrouter_model" in d:
             cfg["llm"]["openrouter"]["model"] = d["openrouter_model"]
+        if "openrouter_use_free" in d:
+            cfg["llm"]["openrouter"]["use_free_models"] = d["openrouter_use_free"]
         if "openrouter_api_key" in d and d["openrouter_api_key"]:
             _set_env_value("OPENROUTER_API_KEY", d["openrouter_api_key"])
         if "nvidia_enabled" in d:
@@ -713,12 +949,9 @@ def create_app(
 
         if "mode" in d:
             mode = d["mode"]
-            if mode == "playwright":
-                cfg["skills"]["builtin"]["browser"] = cfg["skills"]["builtin"].get("browser", {})
-                cfg["skills"]["builtin"]["browser"]["enabled"] = True
-            elif mode == "none":
-                cfg["skills"]["builtin"]["browser"] = cfg["skills"]["builtin"].get("browser", {})
-                cfg["skills"]["builtin"]["browser"]["enabled"] = False
+            cfg["skills"]["builtin"]["browser"] = cfg["skills"]["builtin"].get("browser", {})
+            cfg["skills"]["builtin"]["browser"]["mode"] = mode
+            cfg["skills"]["builtin"]["browser"]["enabled"] = mode != "none"
 
         if "brave_api_key" in d:
             _set_env_value("BRAVE_API_KEY", d["brave_api_key"])
@@ -797,6 +1030,142 @@ def create_app(
         _save_yaml_config(cfg)
         return {"updated": True, "restart_required": "port" in d}
 
+    @api.put("/config/proactive")
+    async def update_proactive_config(body: ConfigUpdate, request: Request, user_id: str = Depends(get_current_user)):
+        """Update proactive/self-healing configuration."""
+        cfg = _load_yaml_config()
+        d = body.data
+        if "proactive" not in cfg:
+            cfg["proactive"] = {}
+        if "self_healing_enabled" in d:
+            cfg["proactive"]["self_healing_enabled"] = bool(d["self_healing_enabled"])
+        if "self_healing_check_interval_seconds" in d:
+            sec = int(d["self_healing_check_interval_seconds"])
+            cfg["proactive"]["self_healing_check_interval_seconds"] = max(60, min(86400, sec))
+        _save_yaml_config(cfg)
+        from ..utils.config import reload_settings
+        reload_settings()
+        # Apply to running service
+        healer = getattr(request.app.state, "self_healing_service", None)
+        settings = get_settings()
+        if healer:
+            healer.update_config(
+                settings.proactive.self_healing_enabled,
+                settings.proactive.self_healing_check_interval_seconds,
+            )
+            if settings.proactive.self_healing_enabled:
+                if not healer._running:
+                    await healer.start()
+            else:
+                if healer._running:
+                    await healer.stop()
+        return {"updated": True}
+
+    # -- Workspace (SOUL / USER / IDENTITY / AGENTS) --
+
+    _WORKSPACE_FILE_MAP = {"soul": "SOUL.md", "identity": "IDENTITY.md", "user": "USER.md", "agents": "AGENTS.md"}
+
+    @api.get("/workspace")
+    async def get_workspace_info(user_id: str = Depends(get_current_user)):
+        """List workspace files and whether bootstrap is needed."""
+        from ..core.workspace import get_workspace_dir, is_bootstrap_needed
+        root = get_workspace_dir()
+        if not root:
+            return {"enabled": False, "bootstrap_needed": False, "files": []}
+        files = []
+        for key, fname in _WORKSPACE_FILE_MAP.items():
+            path = root / fname
+            files.append({"id": key, "file": fname, "exists": path.exists()})
+        return {"enabled": True, "bootstrap_needed": is_bootstrap_needed(), "files": files}
+
+    @api.get("/workspace/{file_key}")
+    async def get_workspace_file(
+        file_key: str,
+        user_id: str = Depends(get_current_user),
+    ):
+        """Get content of SOUL, IDENTITY, USER, or AGENTS (file_key: soul | identity | user | agents)."""
+        from ..core.workspace import read_workspace_file
+        fname = _WORKSPACE_FILE_MAP.get(file_key.lower())
+        if not fname:
+            raise HTTPException(status_code=404, detail="Unknown workspace file")
+        uid = user_id if file_key.lower() == "user" else None
+        content = read_workspace_file(fname, user_id=uid)
+        if content is None:
+            raise HTTPException(status_code=404, detail="File not found or workspace disabled")
+        return {"file": fname, "content": content}
+
+    @api.put("/workspace/{file_key}")
+    async def put_workspace_file(
+        file_key: str,
+        body: WorkspaceFileUpdate,
+        user_id: str = Depends(get_current_user),
+    ):
+        """Update SOUL, IDENTITY, USER, or AGENTS. For user, body.user_id can set per-user USER.md."""
+        from ..core.workspace import write_workspace_file
+        fname = _WORKSPACE_FILE_MAP.get(file_key.lower())
+        if not fname:
+            raise HTTPException(status_code=404, detail="Unknown workspace file")
+        uid = body.user_id if body.user_id else (user_id if file_key.lower() == "user" else None)
+        ok = write_workspace_file(fname, body.content, user_id=uid)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to write file")
+        return {"updated": True, "file": fname}
+
+    @api.post("/workspace/bootstrap")
+    async def post_workspace_bootstrap(
+        request: Request,
+        body: Optional[WorkspaceBootstrapRequest] = Body(None),
+        user_id: str = Depends(get_current_user),
+    ):
+        """Run workspace bootstrap. Pass body.answers (user_name, assistant_name, etc.) for non-interactive; else run CLI with --bootstrap."""
+        from ..core.workspace import is_bootstrap_needed
+        from ..core.workspace_bootstrap import run_bootstrap
+        if not is_bootstrap_needed():
+            return {"done": False, "message": "Workspace already bootstrapped"}
+        orchestrator = getattr(request.app.state, "orchestrator", None)
+        llm = getattr(orchestrator, "llm_router", None) if orchestrator else None
+        answers = (body.answers if body else None) or None
+        if answers is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide body.answers (user_name, assistant_name, assistant_role, tone, work_habits) or run: python -m src.main --bootstrap",
+            )
+        ok = await run_bootstrap(llm_router=llm, use_llm=bool(llm), answers=answers)
+        return {"done": ok, "message": "Bootstrap completed" if ok else "Bootstrap failed"}
+
+    @api.get("/trace")
+    async def get_trace_log(user_id: str = Depends(get_current_user)):
+        """Return recent trace events for debugging (chat start/done, etc.)."""
+        log = getattr(app.state, "trace_log", [])
+        return {"events": log[-100:], "count": len(log)}
+
+    @api.post("/config/orchestrator")
+    async def update_orchestrator_config(
+        body: ConfigUpdate,
+        user_id: str = Depends(get_current_user),
+    ):
+        """Update orchestrator config (e.g. max_tool_iterations). Writes to settings YAML."""
+        cfg = _load_yaml_config()
+        if "orchestrator" not in cfg:
+            cfg["orchestrator"] = {}
+        d = body.data
+        if "max_tool_iterations" in d:
+            v = int(d["max_tool_iterations"])
+            cfg["orchestrator"]["max_tool_iterations"] = max(1, min(50, v))
+        _save_yaml_config(cfg)
+        from ..utils.config import reload_settings
+        reload_settings()
+        return {"updated": True, "restart_required": False}
+
+    @api.post("/self-healing/check")
+    async def run_self_healing_check(request: Request, user_id: str = Depends(get_current_user)):
+        """Run self-healing once on all logs up to now (no recurring loop)."""
+        healer = getattr(request.app.state, "self_healing_service", None)
+        if not healer:
+            raise HTTPException(status_code=503, detail="Self-healing service not available")
+        result = await healer.check_and_heal()
+        return {"ok": True, "result": result}
+
     @api.post("/config/validate-key")
     async def validate_api_key(body: KeyValidation, user_id: str = Depends(get_current_user)):
         """Validate an API key before saving."""
@@ -815,7 +1184,8 @@ def create_app(
             return {"valid": valid, "message": msg}
 
         if body.key_type == "openrouter":
-            valid, msg = SystemDetector.validate_openrouter_key(body.key_value)
+            use_free = (body.extra or {}).get("use_free", "false").lower() in ("true", "1")
+            valid, msg = SystemDetector.validate_openrouter_key(body.key_value, use_free_models=use_free)
             return {"valid": valid, "message": msg}
 
         if body.key_type == "nvidia":
@@ -828,6 +1198,30 @@ def create_app(
             return {"valid": valid, "message": msg}
 
         return {"valid": False, "message": f"Unknown key type: {body.key_type}"}
+
+    @api.get("/config/llm/models")
+    async def get_llm_models(
+        provider: str = Query(..., description="anthropic | openrouter | nvidia | gemini"),
+        free_only: bool = Query(False, description="OpenRouter: only free models"),
+        user_id: str = Depends(get_current_user),
+    ):
+        """Fetch dynamic model list for a provider. Uses saved keys from .env when available."""
+        from src.utils import model_lists
+
+        env = _load_env_values()
+        if provider == "anthropic":
+            models = model_lists.fetch_anthropic_models(api_key=env.get("ANTHROPIC_API_KEY"))
+        elif provider == "openrouter":
+            models = model_lists.fetch_openrouter_models(
+                api_key=env.get("OPENROUTER_API_KEY"), free_only=free_only
+            )
+        elif provider == "nvidia":
+            models = model_lists.fetch_nvidia_models(api_key=env.get("NVIDIA_API_KEY"))
+        elif provider == "gemini":
+            models = model_lists.fetch_gemini_models(api_key=env.get("GOOGLE_API_KEY"))
+        else:
+            return {"models": [], "error": f"Unknown provider: {provider}"}
+        return {"models": models}
 
     @api.get("/config/detection")
     async def run_detection(user_id: str = Depends(get_current_user)):
@@ -884,31 +1278,64 @@ def create_app(
 
     @api.get("/system/status")
     async def get_system_status(user_id: str = Depends(get_current_user)):
-        status_data: dict[str, Any] = {"timestamp": datetime.now(timezone.utc).isoformat()}
-        if app.state.orchestrator:
-            status_data["llm"] = {
-                "local_available": app.state.orchestrator.llm_router._local_available,
-                "cloud_available": app.state.orchestrator.llm_router._cloud_available,
-            }
-            status_data["context"] = app.state.orchestrator.context_manager.get_stats()
-            status_data["queue"] = app.state.orchestrator.message_router.get_stats()
-            if app.state.orchestrator._rag_pipeline:
-                status_data["rag"] = app.state.orchestrator._rag_pipeline.get_stats()
-        if app.state.skill_registry:
-            status_data["skills"] = app.state.skill_registry.get_stats()
-        if app.state.security_guardian:
-            status_data["security"] = app.state.security_guardian.get_stats()
-        # New subsystems
-        if hasattr(app.state, "vector_memory") and app.state.vector_memory:
-            status_data["vector_memory"] = app.state.vector_memory.get_stats()
-        if hasattr(app.state, "process_manager") and app.state.process_manager:
-            status_data["background_processes"] = len(app.state.process_manager.list_processes(running_only=True))
-        if hasattr(app.state, "scheduler") and app.state.scheduler:
-            status_data["scheduled_jobs"] = len(app.state.scheduler.list_jobs())
-        if hasattr(app.state, "plugin_loader") and app.state.plugin_loader:
-            status_data["plugins"] = len(app.state.plugin_loader.list_plugins())
-        if hasattr(app.state, "device_manager") and app.state.device_manager:
-            status_data["paired_devices"] = len(app.state.device_manager.list_devices())
+        status_data: dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "skills": {"enabled_skills": 0, "total_skills": 0, "total_capabilities": 0, "skill_names": []},
+            "scheduled_jobs": 0,
+            "vector_memory": {"document_count": 0, "initialized": False},
+            "plugins": 0,
+        }
+        try:
+            if app.state.orchestrator:
+                r = app.state.orchestrator.llm_router
+                status_data["llm"] = {
+                    "local_available": r._local_available,
+                    "cloud_available": r._cloud_available,
+                    "gemini_available": getattr(r, "_gemini_available", None),
+                    "openrouter_available": getattr(r, "_openrouter_available", None),
+                    "nvidia_available": getattr(r, "_nvidia_available", None),
+                }
+                status_data["context"] = app.state.orchestrator.context_manager.get_stats()
+                status_data["queue"] = app.state.orchestrator.message_router.get_stats()
+                if app.state.orchestrator._rag_pipeline:
+                    status_data["rag"] = app.state.orchestrator._rag_pipeline.get_stats()
+        except Exception as e:
+            logger.warning("system/status orchestrator: %s", e)
+        try:
+            if getattr(app.state, "skill_registry", None):
+                status_data["skills"] = app.state.skill_registry.get_stats()
+        except Exception as e:
+            logger.warning("system/status skills: %s", e)
+        try:
+            if getattr(app.state, "security_guardian", None):
+                status_data["security"] = app.state.security_guardian.get_stats()
+        except Exception as e:
+            logger.warning("system/status security: %s", e)
+        try:
+            if getattr(app.state, "vector_memory", None):
+                status_data["vector_memory"] = app.state.vector_memory.get_stats()
+        except Exception as e:
+            logger.warning("system/status vector_memory: %s", e)
+        try:
+            if getattr(app.state, "process_manager", None):
+                status_data["background_processes"] = len(app.state.process_manager.list_processes(running_only=True))
+        except Exception as e:
+            logger.warning("system/status process_manager: %s", e)
+        try:
+            if getattr(app.state, "scheduler", None):
+                status_data["scheduled_jobs"] = len(app.state.scheduler.list_jobs())
+        except Exception as e:
+            logger.warning("system/status scheduler: %s", e)
+        try:
+            if getattr(app.state, "plugin_loader", None):
+                status_data["plugins"] = len(app.state.plugin_loader.list_plugins())
+        except Exception as e:
+            logger.warning("system/status plugin_loader: %s", e)
+        try:
+            if getattr(app.state, "device_manager", None):
+                status_data["paired_devices"] = len(app.state.device_manager.list_devices())
+        except Exception as e:
+            logger.warning("system/status device_manager: %s", e)
         return status_data
 
     @api.post("/knowledge/process")
@@ -982,8 +1409,20 @@ def create_app(
     @api.get("/usage")
     async def get_usage_stats(user_id: str = Depends(get_current_user)):
         """LLM usage and cost tracking."""
-        from ..core.usage_tracker import get_usage_tracker
-        return get_usage_tracker().get_stats()
+        try:
+            from ..core.usage_tracker import get_usage_tracker
+            return get_usage_tracker().get_stats()
+        except Exception as e:
+            logger.warning("get_usage_stats: %s", e)
+            return {
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_tokens": 0,
+                "total_calls": 0,
+                "cost_estimate_usd": 0.0,
+                "avg_latency_ms": 0.0,
+                "by_provider": {},
+            }
 
     @api.get("/export")
     async def export_data(
@@ -1106,23 +1545,47 @@ def create_app(
 
     @api.get("/hud/vitals")
     async def get_hud_vitals(user_id: str = Depends(get_current_user)):
-        """System vitals for HUD dashboard."""
+        """System vitals for HUD dashboard. CPU/memory/disk from psutil; LLM from router."""
         vitals: dict[str, Any] = {"timestamp": datetime.now(timezone.utc).isoformat()}
         try:
             import psutil
-            vitals["cpu_percent"] = psutil.cpu_percent(interval=0.1)
-            vitals["memory_percent"] = psutil.virtual_memory().percent
-            vitals["memory_used_gb"] = round(psutil.virtual_memory().used / (1024**3), 2)
-            vitals["memory_total_gb"] = round(psutil.virtual_memory().total / (1024**3), 2)
-            vitals["disk_percent"] = psutil.disk_usage("/").percent
-        except ImportError:
+            # CPU: use interval so first call is accurate (interval=None would return 0 first time)
+            vitals["cpu_percent"] = round(psutil.cpu_percent(interval=0.2), 1)
+        except Exception:
             vitals["cpu_percent"] = 0
+        try:
+            import psutil
+            vmem = psutil.virtual_memory()
+            vitals["memory_percent"] = round(vmem.percent, 1)
+            vitals["memory_used_gb"] = round(vmem.used / (1024**3), 2)
+            vitals["memory_total_gb"] = round(vmem.total / (1024**3), 2)
+        except Exception:
             vitals["memory_percent"] = 0
-            vitals["error"] = "psutil not installed"
+            vitals["memory_used_gb"] = 0
+            vitals["memory_total_gb"] = 0
+        try:
+            import psutil
+            import os
+            # Use current directory's partition so Windows and containers get the right disk
+            disk_path = os.getcwd()
+            if os.name == "nt" and len(disk_path) >= 2 and disk_path[1] == ":":
+                disk_path = disk_path[:2] + os.sep
+            du = psutil.disk_usage(disk_path)
+            vitals["disk_percent"] = round(du.percent, 1)
+            vitals["disk_used_gb"] = round(du.used / (1024**3), 2)
+            vitals["disk_total_gb"] = round(du.total / (1024**3), 2)
+        except Exception:
+            vitals["disk_percent"] = 0
+            vitals["disk_used_gb"] = 0
+            vitals["disk_total_gb"] = 0
         if app.state.orchestrator:
+            r = app.state.orchestrator.llm_router
             vitals["llm"] = {
-                "local": app.state.orchestrator.llm_router._local_available,
-                "cloud": app.state.orchestrator.llm_router._cloud_available,
+                "local": r._local_available,
+                "cloud": r._cloud_available,
+                "gemini": getattr(r, "_gemini_available", None),
+                "openrouter": getattr(r, "_openrouter_available", None),
+                "nvidia": getattr(r, "_nvidia_available", None),
             }
         if hasattr(app.state, "orchestrator") and app.state.orchestrator and hasattr(app.state.orchestrator, "_channels"):
             vitals["channels"] = {n: c.is_connected for n, c in app.state.orchestrator._channels.items()}
@@ -1131,20 +1594,34 @@ def create_app(
     @api.get("/hud/timeline")
     async def get_hud_timeline(user_id: str = Depends(get_current_user)):
         """Today's conversations for timeline view."""
-        if not app.state.orchestrator:
+        try:
+            if not getattr(app.state, "orchestrator", None):
+                return {"events": []}
+            ctxs = await app.state.orchestrator.context_manager.get_active_contexts()
+            today = datetime.now(timezone.utc).date()
+            events = []
+            for ctx in ctxs:
+                try:
+                    updated = getattr(ctx, "updated_at", None)
+                    if not updated:
+                        continue
+                    ctx_date = updated.date() if hasattr(updated, "date") and callable(getattr(updated, "date")) else None
+                    if ctx_date != today:
+                        continue
+                    messages = getattr(ctx, "messages", []) or []
+                    message_count = len([m for m in messages if getattr(m, "role", "") != "system"])
+                    events.append({
+                        "channel": getattr(ctx, "channel", ""),
+                        "user_id": getattr(ctx, "user_id", ""),
+                        "updated_at": updated.isoformat() if hasattr(updated, "isoformat") else str(updated),
+                        "message_count": message_count,
+                    })
+                except Exception as e:
+                    logger.debug("hud/timeline skip context: %s", e)
+            return {"events": events[:50]}
+        except Exception as e:
+            logger.warning("hud/timeline: %s", e)
             return {"events": []}
-        ctxs = await app.state.orchestrator.context_manager.get_active_contexts()
-        today = datetime.now(timezone.utc).date()
-        events = []
-        for ctx in ctxs:
-            if ctx.updated_at and ctx.updated_at.date() == today:
-                events.append({
-                    "channel": ctx.channel,
-                    "user_id": ctx.user_id,
-                    "updated_at": ctx.updated_at.isoformat(),
-                    "message_count": len([m for m in ctx.messages if m.role != "system"]),
-                })
-        return {"events": events[:50]}
 
     @api.get("/hud/agents")
     async def get_hud_agents(user_id: str = Depends(get_current_user)):
@@ -1156,9 +1633,14 @@ def create_app(
     @api.get("/hud/agents/full")
     async def get_all_agents_full(user_id: str = Depends(get_current_user)):
         """All agent tasks with bot status for real-time dashboard."""
-        if not hasattr(app.state, "agent_coordinator") or not app.state.agent_coordinator:
+        try:
+            if not getattr(app.state, "agent_coordinator", None):
+                return {"agents": []}
+            agents = app.state.agent_coordinator.list_all_agents(include_completed=True)
+            return {"agents": agents if isinstance(agents, list) else []}
+        except Exception as e:
+            logger.warning("hud/agents/full: %s", e)
             return {"agents": []}
-        return {"agents": app.state.agent_coordinator.list_all_agents(include_completed=True)}
 
     # -- Agents --
 
@@ -2203,9 +2685,14 @@ def _detect_provider_mode(cfg: dict) -> str:
 
 
 def _detect_browser_mode(cfg: dict) -> str:
-    """Detect browser mode from config."""
+    """Detect browser mode from config (wizard writes mode; fallback to enabled + BRAVE_API_KEY)."""
     browser_cfg = cfg.get("skills", {}).get("builtin", {}).get("browser", {})
+    if isinstance(browser_cfg, dict) and browser_cfg.get("mode") in ("playwright", "brave", "none"):
+        return browser_cfg["mode"]
     if isinstance(browser_cfg, dict) and browser_cfg.get("enabled"):
+        env = _load_env_values()
+        if env.get("BRAVE_API_KEY"):
+            return "brave"
         return "playwright"
     env = _load_env_values()
     if env.get("BRAVE_API_KEY"):

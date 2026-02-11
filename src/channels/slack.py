@@ -5,6 +5,7 @@ from typing import Any
 
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
+from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from ..utils.config import get_settings
@@ -192,9 +193,34 @@ class SlackChannel(BaseChannel):
             logger.error("Failed to authenticate Slack bot", error=str(e))
             raise
 
-        # Start Socket Mode handler
+        # Preflight: check App-Level Token before starting Socket Mode (avoids SDK retry spam)
+        try:
+            await self.client.apps_connections_open(app_token=app_token)
+        except SlackApiError as e:
+            err = None
+            if getattr(e, "response", None) is not None and getattr(e.response, "data", None):
+                err = e.response.data.get("error") if isinstance(e.response.data, dict) else None
+            err = err or str(e)
+            if err == "invalid_auth":
+                logger.warning(
+                    "Slack Socket Mode skipped: invalid App-Level Token. "
+                    "Check SLACK_APP_TOKEN in .env (xapp-1-... with connections:write, Socket Mode on). "
+                    "Disable Slack in Settings → Channels if you do not need it."
+                )
+            else:
+                logger.warning("Slack Socket Mode skipped: %s", err)
+            return
+        except Exception as e:
+            logger.warning("Slack Socket Mode preflight failed: %s", e)
+            return
+
+        # Start Socket Mode handler (preflight passed, so this should connect)
         self._handler = AsyncSocketModeHandler(self.app, app_token)
-        await self._handler.connect_async()
+        try:
+            await self._handler.connect_async()
+        except Exception as e:
+            logger.warning("Slack Socket Mode connection failed after preflight: %s", e)
+            return
 
         self._connected = True
         logger.info("Slack channel started")

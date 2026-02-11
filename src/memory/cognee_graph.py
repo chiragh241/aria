@@ -301,7 +301,18 @@ class CogneeGraphMemory:
 
             return formatted
         except Exception as e:
-            logger.error("Cognee search failed", error=str(e))
+            err_str = str(e)
+            # Cognee not yet initialized (no data added/cognify) — avoid error spam
+            if (
+                "DatabaseNotCreatedError" in err_str
+                or "SearchPreconditionError" in err_str
+                or "not been created" in err_str
+                or "Search prerequisites not met" in err_str
+                or "no database" in err_str.lower()
+            ):
+                logger.debug("Cognee search skipped (not initialized): %s", err_str[:120])
+            else:
+                logger.warning("Cognee search failed: %s", err_str[:200])
             return []
 
     async def delete_dataset(self, dataset_name: str = "aria_knowledge") -> bool:

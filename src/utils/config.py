@@ -61,6 +61,7 @@ class OpenRouterLLMConfig(BaseModel):
     max_tokens: int = 4096
     timeout: int = 120
     enabled: bool = False
+    use_free_models: bool = False  # Use :free variant (no cost, may have rate limits)
 
 
 class NvidiaLLMConfig(BaseModel):
@@ -86,6 +87,8 @@ class LLMRoutingConfig(BaseModel):
         ]
     )
     fallback_to_cloud: bool = True
+    # Default context window (tokens) when model-specific value unknown; used for proportional tool truncation
+    context_window_default: int = 200_000
 
 
 class LLMConfig(BaseModel):
@@ -169,10 +172,22 @@ class SandboxConfig(BaseModel):
 
 
 class ShortTermMemoryConfig(BaseModel):
-    """Short-term memory configuration."""
+    """Short-term memory configuration (context efficiency)."""
 
     max_messages: int = 50
     max_tokens: int = 8000
+    # Truncate tool results before adding to context
+    max_tool_result_chars: int = 4000
+    # If True, cap tool result to min(max_tool_result_chars, context_window * 0.3 * 4)
+    use_proportional_tool_result: bool = True
+    # Hard cap when persisting tool results to disk (single result never exceeds this)
+    max_tool_result_chars_at_persist: int = 400_000
+    # History limit by user turns (last N user messages + their replies); 0 = use max_messages only
+    max_turns: int = 30
+    # Reserve tokens for compaction summary generation (must stay free when trimming)
+    compaction_reserve_tokens: int = 20_000
+    # Token count above which we run compaction/trim before next LLM call (0 = disable token-based trim)
+    compaction_trigger_tokens: int = 0  # 0 = use max_messages only; set e.g. 100_000 to enable
 
 
 class LongTermMemoryConfig(BaseModel):
@@ -196,7 +211,7 @@ class KnowledgeGraphConfig(BaseModel):
 
     enabled: bool = True
     provider: str = "cognee"
-    auto_process_after_ingest: bool = False
+    auto_process_after_ingest: bool = True
 
 
 class MemoryConfig(BaseModel):
@@ -209,6 +224,12 @@ class MemoryConfig(BaseModel):
     user_profiles_enabled: bool = True
     entity_extraction_enabled: bool = True
     auto_summarize: bool = True
+    # Per-channel history turn limit (e.g. {"web": 50, "slack:dm": 20}). Overrides short_term.max_turns when key matches channel or "channel:user".
+    channel_history_limits: dict[str, int] = Field(default_factory=dict)
+    # RAG/injected context: max total chars, and head/tail ratio when trimming long content (0.7 = 70% head, 0.2 = 20% tail)
+    rag_max_chars: int = 2500
+    rag_head_ratio: float = 0.7
+    rag_tail_ratio: float = 0.2
 
 
 class DatabaseConfig(BaseModel):
@@ -267,6 +288,8 @@ class BuiltinSkillsConfig(BaseModel):
     tracking: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
     home: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
     webhook: dict[str, Any] = Field(default_factory=lambda: {"enabled": False})
+    camera: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    voice_call: dict[str, Any] = Field(default_factory=lambda: {"enabled": False, "provider": "twilio", "account_sid": "", "auth_token": "", "from_number": "", "twiml_base_url": ""})
     agent: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
     research: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
     notion: dict[str, Any] = Field(default_factory=lambda: {"enabled": False, "api_key": ""})
@@ -274,7 +297,7 @@ class BuiltinSkillsConfig(BaseModel):
     linear: dict[str, Any] = Field(default_factory=lambda: {"enabled": False, "api_key": ""})
     spotify: dict[str, Any] = Field(default_factory=lambda: {"enabled": False, "client_id": "", "client_secret": ""})
     context: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
-    workflow: dict[str, Any] = Field(default_factory=lambda: {"enabled": True})
+    workflow: dict[str, Any] = Field(default_factory=lambda: {"enabled": True, "workflows_dir": "./data/workflows", "retry_per_step": 1})
 
 
 class LearnedSkillsConfig(BaseModel):
@@ -314,8 +337,8 @@ class ProactiveConfig(BaseModel):
     """Proactive intelligence configuration."""
 
     enabled: bool = True
-    self_healing_enabled: bool = True
-    self_healing_check_interval_seconds: int = 10
+    self_healing_enabled: bool = False
+    self_healing_check_interval_seconds: int = 300
     morning_briefing: bool = True
     briefing_time: str = "08:00"
     briefing_channel: str = ""
@@ -338,6 +361,23 @@ class AgentsConfig(BaseModel):
     research_enabled: bool = True
     coding_enabled: bool = True
     data_enabled: bool = True
+    # Sub-agents: main assistant can delegate work to specialist agents (research, coding, data)
+    subagents_enabled: bool = True
+
+
+class OrchestratorConfig(BaseModel):
+    """Orchestrator/chat loop configuration (more iterations = finish more tasks in one turn)."""
+
+    max_tool_iterations: int = 15  # Tool-call rounds per user message; raise to let model complete complex tasks
+
+
+class WorkspaceConfig(BaseModel):
+    """Workspace: SOUL.md, USER.md, AGENTS.md, IDENTITY.md loaded into system prompt."""
+
+    enabled: bool = True
+    path: str = "./data/workspace"  # Directory containing SOUL.md, USER.md, AGENTS.md, IDENTITY.md
+    max_injected_chars: int = 32_768  # Cap total workspace content injected into system prompt
+    bootstrap_on_first_run: bool = True  # If True, run bootstrap when workspace is unconfigured (template-only, no LLM)
 
 
 class OneContextConfig(BaseModel):
@@ -346,6 +386,14 @@ class OneContextConfig(BaseModel):
     enabled: bool = True
     working_path: str = "./data/aria_workspace"
     sync_on_agent_complete: bool = True
+
+
+class WebhooksConfig(BaseModel):
+    """Inbound webhooks (e.g. Gmail Pub/Sub push)."""
+
+    gmail: dict[str, Any] = Field(
+        default_factory=lambda: {"enabled": False, "token": "", "deliver_user_id": "webhook"}
+    )
 
 
 class Settings(BaseSettings):
@@ -370,7 +418,10 @@ class Settings(BaseSettings):
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)
+    workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     onecontext: OneContextConfig = Field(default_factory=OneContextConfig)
+    webhooks: WebhooksConfig = Field(default_factory=WebhooksConfig)
     feature_overrides: dict[str, bool] = Field(default_factory=dict)
 
     # API keys from environment
@@ -405,7 +456,37 @@ class Settings(BaseSettings):
         # Expand environment variables in the config
         config_data = cls._expand_env_vars(config_data)
 
-        return cls(**config_data)
+        # Inject API keys from environment so providers get keys after .env is loaded
+        env_keys = [
+            ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+            ("google_api_key", "GOOGLE_API_KEY"),
+            ("openrouter_api_key", "OPENROUTER_API_KEY"),
+            ("nvidia_api_key", "NVIDIA_API_KEY"),
+            ("slack_bot_token", "SLACK_BOT_TOKEN"),
+            ("slack_app_token", "SLACK_APP_TOKEN"),
+            ("jwt_secret", "JWT_SECRET"),
+        ]
+        for field_name, env_var in env_keys:
+            if field_name not in config_data:
+                config_data[field_name] = os.environ.get(env_var, "")
+
+        try:
+            instance = cls(**config_data)
+        except Exception as e:
+            raise ValueError(f"Invalid config: {e}") from e
+        instance.validate()
+        return instance
+
+    def validate(self) -> None:
+        """Validate critical config. Raises ValueError on failure."""
+        errors: list[str] = []
+        if not (self.aria.name and isinstance(self.aria.name, str)):
+            errors.append("aria.name must be a non-empty string")
+        if getattr(self.llm, "local", None) and getattr(self.llm.local, "enabled", True):
+            if not getattr(self.llm.local, "base_url", "").strip():
+                errors.append("llm.local.base_url required when local LLM is enabled")
+        if errors:
+            raise ValueError("Config validation failed: " + "; ".join(errors))
 
     @classmethod
     def _expand_env_vars(cls, data: Any) -> Any:

@@ -11,6 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from src.cli.detection import SystemDetector
+from src.utils import model_lists
 from src.cli.hardware import (
     best_downloaded_model,
     detect_hardware,
@@ -41,6 +42,13 @@ if TYPE_CHECKING:
     from src.cli.detection import DetectionResults
     from src.cli.wizard import WizardState
 
+# NVIDIA NIM models: (label, value). Add more here as we support them.
+NVIDIA_MODELS = [
+    ("Kimi K2 Thinking (reasoning + answer)", "moonshotai/kimi-k2-thinking"),
+    ("Kimi K2.5 (Moonshot)", "moonshotai/kimi-k2.5"),
+]
+NVIDIA_DEFAULT_MODEL = NVIDIA_MODELS[0][1]
+
 
 def run_step(console: Console, state: WizardState, detection: DetectionResults) -> bool:
     """Run the LLM provider configuration step.
@@ -51,7 +59,8 @@ def run_step(console: Console, state: WizardState, detection: DetectionResults) 
     console.print(
         Panel(
             f"[{PRIMARY}]Choose how Aria connects to large language models.\n"
-            f"[{MUTED}]Hybrid mode uses a local model for simple tasks and Claude for complex ones.",
+            f"[{MUTED}]Hybrid uses a local model for simple tasks and Claude for complex ones. "
+            "You can also use Gemini, OpenRouter, or NVIDIA NIM only.",
             title=step_title(1, "LLM Provider"),
             border_style=PANEL_BORDER,
             box=PANEL_BOX,
@@ -70,6 +79,18 @@ def run_step(console: Console, state: WizardState, detection: DetectionResults) 
         questionary.Choice(
             title="Anthropic Claude only",
             value="anthropic",
+        ),
+        questionary.Choice(
+            title="Google Gemini only",
+            value="gemini",
+        ),
+        questionary.Choice(
+            title="OpenRouter only (400+ models)",
+            value="openrouter",
+        ),
+        questionary.Choice(
+            title="NVIDIA NIM only (e.g. Kimi K2 Thinking)",
+            value="nvidia",
         ),
         questionary.Choice(
             title="Ollama only (local, no API key needed)",
@@ -91,6 +112,21 @@ def run_step(console: Console, state: WizardState, detection: DetectionResults) 
     # Configure Anthropic if needed
     if provider in ("anthropic", "hybrid"):
         if not _configure_anthropic(console, state, detection):
+            return False
+
+    # Configure Gemini if needed
+    if provider == "gemini":
+        if not _configure_gemini(console, state, detection):
+            return False
+
+    # Configure OpenRouter if needed
+    if provider == "openrouter":
+        if not _configure_openrouter(console, state, detection):
+            return False
+
+    # Configure NVIDIA if needed
+    if provider == "nvidia":
+        if not _configure_nvidia(console, state, detection):
             return False
 
     # Configure Ollama if needed
@@ -120,6 +156,45 @@ def _show_detection_status(console: Console, detection: DetectionResults) -> Non
         table.add_row(
             status_icon(False),
             f"[{MUTED}]No Anthropic API key detected",
+        )
+
+    # Google / Gemini
+    if getattr(detection, "google_key", None) and detection.google_key.installed:
+        source = detection.google_key.extra.get("source", "unknown")
+        table.add_row(
+            status_icon(True),
+            f"Google API key found ({source})",
+        )
+    else:
+        table.add_row(
+            status_icon(False),
+            f"[{MUTED}]No Google API key detected",
+        )
+
+    # OpenRouter
+    if getattr(detection, "openrouter_key", None) and detection.openrouter_key.installed:
+        source = detection.openrouter_key.extra.get("source", "unknown")
+        table.add_row(
+            status_icon(True),
+            f"OpenRouter API key found ({source})",
+        )
+    else:
+        table.add_row(
+            status_icon(False),
+            f"[{MUTED}]No OpenRouter API key detected",
+        )
+
+    # NVIDIA
+    if getattr(detection, "nvidia_key", None) and detection.nvidia_key.installed:
+        source = detection.nvidia_key.extra.get("source", "unknown")
+        table.add_row(
+            status_icon(True),
+            f"NVIDIA API key found ({source})",
+        )
+    else:
+        table.add_row(
+            status_icon(False),
+            f"[{MUTED}]No NVIDIA API key detected",
         )
 
     # Ollama
@@ -175,17 +250,43 @@ def _configure_anthropic(
             state.anthropic_auth = "existing_key"
             return True
 
-    # Need to enter a key
+    # Need to enter a key or log in via CLI
     auth_method = questionary.select(
         "How would you like to authenticate with Anthropic?",
         choices=[
             questionary.Choice("Enter API key", value="api_key"),
+            questionary.Choice("Log in via CLI (opens browser)", value="cli_login"),
             questionary.Choice("Use Claude Code auth (~/.claude/)", value="claude_code"),
         ],
     ).ask()
 
     if auth_method is None:
         return False
+
+    if auth_method == "cli_login":
+        console.print(f"  [{MUTED}]Starting Claude CLI login...")
+        try:
+            subprocess.run(
+                ["claude", "login"],
+                capture_output=True,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            try:
+                subprocess.run(
+                    ["claude"],
+                    capture_output=True,
+                    timeout=120,
+                )
+            except FileNotFoundError:
+                pass
+        except Exception:
+            pass
+        console.print(
+            f"  [{PRIMARY}]If the browser opened, complete login there. Then re-run setup and choose "
+            "'Use Claude Code auth (~/.claude/)' to use that authentication."
+        )
+        return False  # Back so user can re-run and pick claude_code
 
     if auth_method == "api_key":
         api_key = questionary.password(
@@ -218,15 +319,15 @@ def _configure_anthropic(
     else:
         state.anthropic_auth = "claude_code"
 
-    # Choose model
+    # Choose model (dynamic list when we have a key)
+    api_key = getattr(state, "anthropic_api_key", None) or ""
+    models = model_lists.fetch_anthropic_models(api_key=api_key or None)
+    choices = [questionary.Choice(title=m.get("name") or m["id"], value=m["id"]) for m in models]
+    default = models[0]["id"] if models else "claude-sonnet-4-20250514"
     model = questionary.select(
         "Which Claude model should Aria use?",
-        choices=[
-            questionary.Choice("Claude Sonnet 4 (recommended)", value="claude-sonnet-4-20250514"),
-            questionary.Choice("Claude Opus 4.5", value="claude-opus-4-5-20251101"),
-            questionary.Choice("Claude Haiku 3.5", value="claude-3-5-haiku-20241022"),
-        ],
-        default="claude-sonnet-4-20250514",
+        choices=choices,
+        default=default,
     ).ask()
 
     if model is None:
@@ -234,6 +335,198 @@ def _configure_anthropic(
 
     state.anthropic_model = model
     return True
+
+
+def _configure_gemini(
+    console: Console, state: WizardState, detection: DetectionResults
+) -> bool:
+    """Configure Google Gemini API access."""
+    console.print(f"\n[{PRIMARY}]Google Gemini Configuration[/{PRIMARY}]")
+
+    has_key = getattr(detection, "google_key", None) and detection.google_key.installed
+    if has_key:
+        source = detection.google_key.extra.get("source", "env")
+        console.print(f"  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] API key found in {source}")
+        use_existing = questionary.confirm(
+            "Use the existing API key?",
+            default=True,
+        ).ask()
+        if use_existing is None:
+            return False
+        if use_existing:
+            state.gemini_enabled = True
+            state.gemini_model = _ask_gemini_model(state)
+            return state.gemini_model is not None
+
+    api_key = questionary.password(
+        "Enter your Google AI API key:",
+    ).ask()
+    if api_key is None:
+        return False
+
+    console.print(f"  [{MUTED}]Validating API key...", end="")
+    valid, msg = SystemDetector.validate_google_key(api_key)
+    if valid:
+        console.print(f"\r  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] API key is valid          ")
+    else:
+        console.print(f"\r  [{WARNING}]{ICON_WARN}[/{WARNING}] {msg}          ")
+        proceed = questionary.confirm("Use this key anyway?", default=False).ask()
+        if not proceed:
+            return False
+
+    state.gemini_api_key = api_key
+    state.gemini_enabled = True
+    model = _ask_gemini_model(state)
+    if model is None:
+        return False
+    state.gemini_model = model
+    return True
+
+
+def _ask_gemini_model(state: WizardState) -> str | None:
+    """Prompt for Gemini model choice (dynamic list when key available)."""
+    api_key = getattr(state, "gemini_api_key", None) or ""
+    models = model_lists.fetch_gemini_models(api_key=api_key or None)
+    choices = [questionary.Choice(title=m.get("name") or m["id"], value=m["id"]) for m in models]
+    default = models[0]["id"] if models else "gemini-2.0-flash"
+    return questionary.select(
+        "Which Gemini model should Aria use?",
+        choices=choices,
+        default=default,
+    ).ask()
+
+
+def _configure_openrouter(
+    console: Console, state: WizardState, detection: DetectionResults
+) -> bool:
+    """Configure OpenRouter API access."""
+    console.print(f"\n[{PRIMARY}]OpenRouter Configuration[/{PRIMARY}]")
+
+    # Ask free vs paid first so validation uses the correct model
+    _ask_openrouter_free_paid(state)
+
+    has_key = getattr(detection, "openrouter_key", None) and detection.openrouter_key.installed
+    if has_key:
+        source = detection.openrouter_key.extra.get("source", "env")
+        console.print(f"  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] API key found in {source}")
+        use_existing = questionary.confirm(
+            "Use the existing API key?",
+            default=True,
+        ).ask()
+        if use_existing is None:
+            return False
+        if use_existing:
+            state.openrouter_enabled = True
+            state.openrouter_model = _ask_openrouter_model(state)
+            return state.openrouter_model is not None
+
+    api_key = questionary.password(
+        "Enter your OpenRouter API key (sk-or-...):",
+    ).ask()
+    if api_key is None:
+        return False
+
+    console.print(f"  [{MUTED}]Validating API key ({'free' if state.openrouter_use_free else 'paid'} tier)...", end="")
+    valid, msg = SystemDetector.validate_openrouter_key(api_key, state.openrouter_use_free)
+    if valid:
+        console.print(f"\r  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] API key is valid          ")
+    else:
+        console.print(f"\r  [{WARNING}]{ICON_WARN}[/{WARNING}] {msg}          ")
+        proceed = questionary.confirm("Use this key anyway?", default=False).ask()
+        if not proceed:
+            return False
+
+    state.openrouter_api_key = api_key
+    state.openrouter_enabled = True
+    model = _ask_openrouter_model(state)
+    if model is None:
+        return False
+    state.openrouter_model = model
+    return True
+
+
+def _ask_openrouter_free_paid(state: WizardState) -> None:
+    """Ask whether to use free or paid OpenRouter models."""
+    choice = questionary.select(
+        "Use free models or paid models?",
+        choices=[
+            questionary.Choice("Free (no cost, may have rate limits)", value="free"),
+            questionary.Choice("Paid (usage-based billing)", value="paid"),
+        ],
+        default="paid",
+    ).ask()
+    state.openrouter_use_free = choice == "free"
+
+
+def _ask_openrouter_model(state: WizardState) -> str | None:
+    """Prompt for OpenRouter model choice (dynamic list; free vs paid from state)."""
+    free_only = getattr(state, "openrouter_use_free", False)
+    models = model_lists.fetch_openrouter_models(free_only=free_only)
+    choices = [questionary.Choice(title=m.get("name") or m["id"], value=m["id"]) for m in models]
+    default = models[0]["id"] if models else "anthropic/claude-3.5-sonnet"
+    return questionary.select(
+        "Which OpenRouter model should Aria use?",
+        choices=choices,
+        default=default,
+    ).ask()
+
+
+def _configure_nvidia(
+    console: Console, state: WizardState, detection: DetectionResults
+) -> bool:
+    """Configure NVIDIA NIM API access."""
+    console.print(f"\n[{PRIMARY}]NVIDIA NIM Configuration[/{PRIMARY}]")
+
+    has_key = getattr(detection, "nvidia_key", None) and detection.nvidia_key.installed
+    if has_key:
+        source = detection.nvidia_key.extra.get("source", "env")
+        console.print(f"  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] API key found in {source}")
+        use_existing = questionary.confirm(
+            "Use the existing API key?",
+            default=True,
+        ).ask()
+        if use_existing is None:
+            return False
+        if use_existing:
+            state.nvidia_enabled = True
+            state.nvidia_model = _ask_nvidia_model()
+            return state.nvidia_model is not None
+
+    api_key = questionary.password(
+        "Enter your NVIDIA API key:",
+    ).ask()
+    if api_key is None:
+        return False
+
+    console.print(f"  [{MUTED}]Validating API key...", end="")
+    valid, msg = SystemDetector.validate_nvidia_key(api_key)
+    if valid:
+        console.print(f"\r  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] API key is valid          ")
+    else:
+        console.print(f"\r  [{WARNING}]{ICON_WARN}[/{WARNING}] {msg}          ")
+        proceed = questionary.confirm("Use this key anyway?", default=False).ask()
+        if not proceed:
+            return False
+
+    state.nvidia_api_key = api_key
+    state.nvidia_enabled = True
+    model = _ask_nvidia_model()
+    if model is None:
+        return False
+    state.nvidia_model = model
+    return True
+
+
+def _ask_nvidia_model() -> str | None:
+    """Prompt for NVIDIA model choice (dynamic list from model_lists)."""
+    models = model_lists.fetch_nvidia_models()
+    choices = [questionary.Choice(title=m.get("name") or m["id"], value=m["id"]) for m in models]
+    default = models[0]["id"] if models else NVIDIA_DEFAULT_MODEL
+    return questionary.select(
+        "Which NVIDIA model would you like to use?",
+        choices=choices,
+        default=default,
+    ).ask()
 
 
 def _configure_ollama(
@@ -411,6 +704,19 @@ def _show_summary(console: Console, state: WizardState) -> None:
     if state.llm_provider in ("anthropic", "hybrid"):
         table.add_row("Anthropic auth", state.anthropic_auth or "not set")
         table.add_row("Claude model", state.anthropic_model)
+
+    if state.llm_provider == "gemini":
+        table.add_row("Gemini model", state.gemini_model)
+        table.add_row("Gemini API key", "set" if state.gemini_api_key else "(from env)")
+
+    if state.llm_provider == "openrouter":
+        table.add_row("OpenRouter model", state.openrouter_model)
+        table.add_row("OpenRouter tier", "free" if getattr(state, "openrouter_use_free", False) else "paid")
+        table.add_row("OpenRouter API key", "set" if state.openrouter_api_key else "(from env)")
+
+    if state.llm_provider == "nvidia":
+        table.add_row("NVIDIA model", state.nvidia_model)
+        table.add_row("NVIDIA API key", "set" if state.nvidia_api_key else "(from env)")
 
     if state.llm_provider in ("ollama", "hybrid"):
         table.add_row("Ollama enabled", str(state.ollama_enabled))

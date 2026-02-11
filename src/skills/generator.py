@@ -2,6 +2,7 @@
 
 import ast
 import asyncio
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -45,6 +46,8 @@ class SkillGenerator:
         self._llm_router = llm_router
         self._learned_dir = Path(self.settings.skills.learned.directory).expanduser()
         self._learned_dir.mkdir(parents=True, exist_ok=True)
+        self._pending_dir = Path(self.settings.aria.data_dir).expanduser() / "pending_skills"
+        self._pending_dir.mkdir(parents=True, exist_ok=True)
 
     def set_llm_router(self, router: Any) -> None:
         """Set the LLM router for code generation."""
@@ -372,6 +375,21 @@ Prefer free options: use free/public APIs when possible; for bookings or actions
                 if self.settings.skills.learned.require_approval:
                     return None
 
+        if self.settings.skills.learned.require_approval:
+            from uuid import uuid4
+            pending_id = str(uuid4())[:8]
+            pending_path = self._pending_dir / f"{pending_id}.json"
+            payload = {
+                "id": pending_id,
+                "name": skill.name,
+                "description": skill.description,
+                "code": skill.code,
+                "created_at": skill.created_at.isoformat(),
+            }
+            pending_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            logger.info("Skill saved for approval", skill=skill.name, pending_id=pending_id)
+            return f"pending:{pending_id}"
+
         # Create file
         file_path = self._learned_dir / f"{skill.name}.py"
 
@@ -429,3 +447,53 @@ from src.skills.base import BaseSkill, SkillResult
             logger.info("Deleted learned skill", skill=name)
             return True
         return False
+
+    def list_pending_skills(self) -> list[dict[str, Any]]:
+        """List skills waiting for approval."""
+        result = []
+        for path in self._pending_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                result.append({
+                    "id": data.get("id", path.stem),
+                    "name": data.get("name", ""),
+                    "description": data.get("description", ""),
+                    "created_at": data.get("created_at", ""),
+                })
+            except Exception:
+                continue
+        return result
+
+    def approve_pending_skill(self, pending_id: str) -> str | None:
+        """Move a pending skill to learned dir and return the path. Returns None on failure."""
+        path = self._pending_dir / f"{pending_id}.json"
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            name = data.get("name", "").strip()
+            code = data.get("code", "")
+            if not name or not code:
+                return None
+            full_code = f'''"""
+Generated skill: {name}
+Description: {data.get('description', '')}
+Approved from pending: {pending_id}
+"""
+
+from datetime import datetime, timezone
+from typing import Any
+
+from src.skills.base import BaseSkill, SkillResult
+
+
+{code}
+'''
+            file_path = self._learned_dir / f"{name}.py"
+            file_path.write_text(full_code)
+            path.unlink(missing_ok=True)
+            logger.info("Approved pending skill", skill=name, pending_id=pending_id)
+            return str(file_path)
+        except Exception as e:
+            logger.warning("Failed to approve pending skill", pending_id=pending_id, error=str(e))
+            return None

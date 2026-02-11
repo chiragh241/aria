@@ -20,6 +20,7 @@ from rich.table import Table
 from src.cli.ascii_art import print_banner, print_completion_banner
 from src.cli.config_writer import ConfigWriter
 from src.cli.detection import DetectionResults, SystemDetector
+from src.cli.steps.llm import NVIDIA_DEFAULT_MODEL
 from src.cli.styles import (
     ARIA_THEME,
     ERROR,
@@ -47,13 +48,23 @@ class WizardState:
     """Holds all configuration selections from the wizard steps."""
 
     # Step 1: LLM
-    llm_provider: str = "hybrid"  # "anthropic" | "ollama" | "hybrid"
+    llm_provider: str = "hybrid"  # "anthropic" | "ollama" | "hybrid" | "gemini" | "openrouter" | "nvidia"
     anthropic_auth: str = ""  # "api_key" | "claude_code" | "existing_key"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
     ollama_enabled: bool = True
     ollama_model: str = "llama3.2:latest"
     ollama_base_url: str = "http://localhost:11434"
+    gemini_enabled: bool = False
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+    openrouter_enabled: bool = False
+    openrouter_api_key: str = ""
+    openrouter_model: str = "anthropic/claude-3.5-sonnet"
+    openrouter_use_free: bool = False
+    nvidia_enabled: bool = False
+    nvidia_api_key: str = ""
+    nvidia_model: str = NVIDIA_DEFAULT_MODEL
 
     # Step 2: Channels
     channels_web: bool = True
@@ -206,21 +217,22 @@ def run_wizard() -> bool:
 
 
 def _show_welcome(console: Console) -> None:
-    """Show the welcome banner and intro text."""
+    """Show the welcome banner and first-time intro. Setup = fresh start; no prior name or state."""
     console.clear()
     print_banner(console, version="0.1.0")
 
     console.print(
         Panel(
-            f"[{PRIMARY}]Welcome to the Aria setup wizard![/{PRIMARY}]\n\n"
-            f"[{MUTED}]This wizard will guide you through configuring:\n"
-            f"  {ICON_ARROW} LLM providers (Anthropic Claude / Ollama)\n"
+            f"[{PRIMARY}]Welcome — this is your first-time setup.[/{PRIMARY}]\n\n"
+            f"[{MUTED}]Aria is your personal AI assistant. It can help you with tasks using your files, "
+            f"the web, calendar, email, and more. After setup, Aria will introduce itself and ask what to call you — "
+            f"everything starts fresh.\n\n"
+            f"This wizard will configure:\n"
+            f"  {ICON_ARROW} LLM providers (Claude / Gemini / OpenRouter / NVIDIA / Ollama)\n"
             f"  {ICON_ARROW} Messaging channels (Web / Slack / WhatsApp)\n"
             f"  {ICON_ARROW} Execution environment (Docker / Local)\n"
-            f"  {ICON_ARROW} Dashboard settings\n"
-            f"  {ICON_ARROW} Security profile\n"
-            f"  {ICON_ARROW} Browser automation\n"
-            f"  {ICON_ARROW} Skills and capabilities",
+            f"  {ICON_ARROW} Dashboard and security\n"
+            f"  {ICON_ARROW} Browser automation and skills",
             border_style=PANEL_BORDER,
             box=PANEL_BOX,
         )
@@ -266,6 +278,13 @@ def _build_summary_text(state: WizardState) -> str:
     if s.llm_provider in ("anthropic", "hybrid"):
         lines.append(f"  Claude model: {s.anthropic_model}")
         lines.append(f"  Auth: {s.anthropic_auth or 'not configured'}")
+    if s.llm_provider == "gemini":
+        lines.append(f"  Gemini model: {getattr(s, 'gemini_model', 'gemini-2.0-flash')}")
+    if s.llm_provider == "openrouter":
+        lines.append(f"  OpenRouter model: {getattr(s, 'openrouter_model', 'anthropic/claude-3.5-sonnet')}")
+        lines.append(f"  OpenRouter tier: {'free' if getattr(s, 'openrouter_use_free', False) else 'paid'}")
+    if s.llm_provider == "nvidia":
+        lines.append(f"  NVIDIA model: {getattr(s, 'nvidia_model', NVIDIA_DEFAULT_MODEL)}")
     if s.llm_provider in ("ollama", "hybrid"):
         lines.append(f"  Ollama: {'enabled' if s.ollama_enabled else 'disabled'}")
         if s.ollama_enabled:
@@ -321,6 +340,7 @@ def _finalize(console: Console, state: WizardState) -> bool:
         written = writer.write_all()
         for path in written:
             console.print(f"  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] {path}")
+        console.print(f"  [{SUCCESS}]{ICON_CHECK}[/{SUCCESS}] Cleared previous chat history and memory for fresh start")
     except Exception as e:
         console.print(f"  [{ERROR}]{ICON_CROSS}[/{ERROR}] Failed to write config: {e}")
         return False

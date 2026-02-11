@@ -194,6 +194,21 @@ class SkillRegistry:
                 {"name": "list_webhooks", "description": "List saved webhooks"},
             ],
         },
+        "camera": {
+            "description": "Take screenshots or photos (desktop or device camera)",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "take_screenshot", "description": "Capture desktop screenshot"},
+                {"name": "take_photo", "description": "Capture photo from camera (when available)"},
+            ],
+        },
+        "voice_call": {
+            "description": "Place voice calls via Twilio and speak a message",
+            "version": "1.0.0",
+            "capabilities": [
+                {"name": "initiate_call", "description": "Place outbound call and speak message"},
+            ],
+        },
         "agent": {
             "description": "Autonomous research, coding, and data analysis agents",
             "version": "1.0.0",
@@ -201,6 +216,7 @@ class SkillRegistry:
                 {"name": "research", "description": "Research a topic"},
                 {"name": "code", "description": "Write and run code"},
                 {"name": "analyze", "description": "Analyze data"},
+                {"name": "delegate_subagent", "description": "Delegate a task to a specialist sub-agent (research/coding/data) and get the result"},
             ],
         },
         "research": {
@@ -223,10 +239,12 @@ class SkillRegistry:
             ],
         },
         "workflow": {
-            "description": "Chain skills together: research → draft → email, etc.",
+            "description": "Chain skills or run named workflows (e.g. feature-dev, bug-fix).",
             "version": "1.0.0",
             "capabilities": [
                 {"name": "run_chain", "description": "Execute a chain of skills in sequence"},
+                {"name": "list_workflows", "description": "List available named workflows"},
+                {"name": "run_named_workflow", "description": "Run a named workflow (e.g. feature-dev, bug-fix) for a task"},
             ],
         },
     }
@@ -283,6 +301,8 @@ class SkillRegistry:
             ("tracking", "TrackingSkill", builtin_config.tracking),
             ("home", "HomeSkill", builtin_config.home),
             ("webhook", "WebhookSkill", builtin_config.webhook),
+            ("camera", "CameraSkill", builtin_config.camera),
+            ("voice_call", "VoiceCallSkill", builtin_config.voice_call),
             ("agent", "AgentSkill", builtin_config.agent),
             ("research", "ResearchSkill", builtin_config.research),
             ("notion", "NotionSkill", builtin_config.notion),
@@ -563,6 +583,8 @@ class SkillRegistry:
             "tracking": "TrackingSkill",
             "home": "HomeSkill",
             "webhook": "WebhookSkill",
+            "camera": "CameraSkill",
+            "voice_call": "VoiceCallSkill",
             "agent": "AgentSkill",
             "research": "ResearchSkill",
             "context_skill": "ContextSkill",

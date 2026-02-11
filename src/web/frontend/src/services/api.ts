@@ -90,6 +90,12 @@ export const skillsApi = {
 
   testConnection: (name: string) =>
     api.post(`/skills/${name}/test`),
+
+  listPending: () =>
+    api.get('/skills/pending'),
+
+  approvePending: (pendingId: string) =>
+    api.post(`/skills/pending/${pendingId}/approve`),
 };
 
 export const settingsApi = {
@@ -136,7 +142,31 @@ export const pushApi = {
 
 export const debugApi = {
   getTrace: () =>
-    api.get('/debug/trace'),
+    api.get('/trace'),
+};
+
+export const workspaceApi = {
+  getInfo: () =>
+    api.get('/workspace'),
+
+  getFile: (fileKey: string) =>
+    api.get(`/workspace/${fileKey}`),
+
+  updateFile: (fileKey: string, content: string, userId?: string) =>
+    api.put(`/workspace/${fileKey}`, { content, user_id: userId }),
+
+  bootstrap: (answers?: Record<string, string>) =>
+    api.post('/workspace/bootstrap', { answers: answers ?? {} }),
+};
+
+export const healthApi = {
+  get: () =>
+    api.get('/health'),
+};
+
+export const auditExportApi = {
+  export: (params?: { from_date?: string; to_date?: string; limit?: number }) =>
+    api.get('/audit/export', { params }),
 };
 
 export const skillTemplatesApi = {
@@ -186,6 +216,12 @@ export const agentsApi = {
 export const knowledgeApi = {
   processGraph: () =>
     api.post('/knowledge/process'),
+};
+
+export const selfHealingApi = {
+  /** Run self-healing once on all logs (no recurring loop). */
+  checkNow: () =>
+    api.post('/self-healing/check'),
 };
 
 export const whatsappApi = {
@@ -276,9 +312,21 @@ export const configApi = {
   updateMemory: (data: Record<string, any>) =>
     api.put('/config/memory', { data }),
 
+  /** Update proactive/self-healing config */
+  updateProactive: (data: { self_healing_enabled?: boolean; self_healing_check_interval_seconds?: number }) =>
+    api.put('/config/proactive', { data }),
+
+  /** Update orchestrator config (e.g. max_tool_iterations) */
+  updateOrchestrator: (data: { max_tool_iterations?: number }) =>
+    api.post('/config/orchestrator', { data }),
+
   /** Validate an API key */
   validateKey: (keyType: string, keyValue: string, extra?: Record<string, string>) =>
     api.post('/config/validate-key', { key_type: keyType, key_value: keyValue, extra }),
+
+  /** Fetch dynamic model list for a provider (anthropic | openrouter | nvidia) */
+  getLlmModels: (provider: string, freeOnly?: boolean) =>
+    api.get('/config/llm/models', { params: { provider, free_only: freeOnly } }),
 
   /** Run system detection */
   detection: () =>

@@ -10,7 +10,7 @@ import socket
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -399,10 +399,24 @@ class SystemDetector:
             return False, str(e)
 
     @staticmethod
-    def validate_openrouter_key(api_key: str) -> tuple[bool, str]:
-        """Validate an OpenRouter API key with a minimal test call."""
+    def validate_openrouter_key(api_key: str, use_free_models: bool = False) -> tuple[bool, str]:
+        """Validate an OpenRouter API key (free tier: openrouter/free + reasoning, else paid model)."""
         try:
             import httpx
+
+            if use_free_models:
+                payload: dict[str, Any] = {
+                    "model": "openrouter/free",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 5,
+                    "reasoning": {"enabled": True},
+                }
+            else:
+                payload = {
+                    "model": "anthropic/claude-3.5-haiku",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 5,
+                }
 
             resp = httpx.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -410,11 +424,7 @@ class SystemDetector:
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": "anthropic/claude-3.5-haiku",
-                    "messages": [{"role": "user", "content": "Hi"}],
-                    "max_tokens": 5,
-                },
+                json=payload,
                 timeout=15,
             )
             if resp.status_code == 200:

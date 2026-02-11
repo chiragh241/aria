@@ -20,7 +20,8 @@ class ConversationSummarizer:
     async def summarize(self, messages: list[LLMMessage], max_tokens: int = 200) -> str:
         """Summarize a list of messages into a concise summary.
 
-        Falls back to a simple extraction if no LLM is available.
+        Uses simple extraction when few messages (saves LLM tokens); uses LLM for longer conversations.
+        Falls back to simple extraction if no LLM is available.
         """
         if not messages:
             return ""
@@ -30,14 +31,17 @@ class ConversationSummarizer:
         if not conversation:
             return ""
 
-        # Try LLM-based summary
+        # For small conversation, use fast extractive summary (no LLM call)
+        if len(conversation) <= 10:
+            return self._simple_summarize(conversation, max_tokens)
+
+        # Try LLM-based summary for longer conversations
         if self._llm_router:
             try:
                 return await self._llm_summarize(conversation, max_tokens)
             except Exception as e:
                 logger.debug("LLM summarize failed, using fallback", error=str(e))
 
-        # Fallback: extract key points manually
         return self._simple_summarize(conversation, max_tokens)
 
     async def _llm_summarize(self, messages: list[LLMMessage], max_tokens: int) -> str:

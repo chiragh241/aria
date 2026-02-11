@@ -23,10 +23,12 @@ import {
   Send,
   Play,
   Trash2,
+  Activity,
+  Stethoscope,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
-import { configApi, knowledgeApi, whatsappApi, channelsApi, restartApi, dockerApi, systemApi } from '../services/api';
+import { configApi, knowledgeApi, whatsappApi, channelsApi, restartApi, dockerApi, systemApi, selfHealingApi } from '../services/api';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,6 +46,7 @@ interface FullConfig {
     gemini_key_set?: boolean;
     openrouter_enabled?: boolean;
     openrouter_model?: string;
+    openrouter_use_free?: boolean;
     openrouter_key_set?: boolean;
     nvidia_enabled?: boolean;
     nvidia_model?: string;
@@ -88,6 +91,10 @@ interface FullConfig {
     knowledge_graph_provider: string;
     knowledge_graph_auto_process_after_ingest?: boolean;
   };
+  proactive?: {
+    self_healing_enabled: boolean;
+    self_healing_check_interval_seconds: number;
+  };
 }
 
 interface Detection {
@@ -114,6 +121,7 @@ const TABS = [
   { id: 'skills', label: 'Skills', icon: Puzzle },
   { id: 'integrations', label: 'Integrations', icon: Key },
   { id: 'memory', label: 'Memory', icon: Brain },
+  { id: 'proactive', label: 'Proactive', icon: Activity },
   { id: 'dashboard', label: 'Dashboard', icon: SettingsIcon },
 ] as const;
 
@@ -238,6 +246,7 @@ export default function Settings() {
           {activeTab === 'skills' && <SkillsTab config={config} />}
           {activeTab === 'integrations' && <IntegrationsTab config={config} />}
           {activeTab === 'memory' && <MemoryTab config={config} />}
+          {activeTab === 'proactive' && <ProactiveTab config={config} />}
           {activeTab === 'dashboard' && <DashboardTab config={config} />}
         </div>
       </div>
@@ -355,6 +364,7 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [openrouterEnabled, setOpenrouterEnabled] = useState(config.llm.openrouter_enabled ?? false);
   const [openrouterModel, setOpenrouterModel] = useState(config.llm.openrouter_model ?? 'anthropic/claude-3.5-sonnet');
+  const [openrouterUseFree, setOpenrouterUseFree] = useState(config.llm.openrouter_use_free ?? false);
   const [openrouterApiKey, setOpenrouterApiKey] = useState('');
   const [showOpenrouterKey, setShowOpenrouterKey] = useState(false);
   const [nvidiaEnabled, setNvidiaEnabled] = useState(config.llm.nvidia_enabled ?? false);
@@ -374,6 +384,7 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
     setGeminiModel(config.llm.gemini_model ?? 'gemini-2.0-flash');
     setOpenrouterEnabled(config.llm.openrouter_enabled ?? false);
     setOpenrouterModel(config.llm.openrouter_model ?? 'anthropic/claude-3.5-sonnet');
+    setOpenrouterUseFree(config.llm.openrouter_use_free ?? false);
     setNvidiaEnabled(config.llm.nvidia_enabled ?? false);
     setNvidiaModel(config.llm.nvidia_model ?? 'moonshotai/kimi-k2.5');
   }, [config]);
@@ -390,6 +401,7 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
         gemini_model: geminiModel,
         openrouter_enabled: openrouterEnabled,
         openrouter_model: openrouterModel,
+        openrouter_use_free: openrouterUseFree,
         nvidia_enabled: nvidiaEnabled,
         nvidia_model: nvidiaModel,
       };
@@ -418,12 +430,48 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
   });
 
   const validateOpenrouterMutation = useMutation({
-    mutationFn: async () => (await configApi.validateKey('openrouter', openrouterApiKey)).data,
+    mutationFn: async () =>
+      (
+        await configApi.validateKey('openrouter', openrouterApiKey, {
+          use_free: openrouterUseFree ? 'true' : 'false',
+        })
+      ).data,
   });
 
   const validateNvidiaMutation = useMutation({
     mutationFn: async () => (await configApi.validateKey('nvidia', nvidiaApiKey)).data,
   });
+
+  const { data: anthropicModelsData } = useQuery({
+    queryKey: ['config', 'llm-models', 'anthropic'],
+    queryFn: async () => (await configApi.getLlmModels('anthropic')).data as { models: { id: string; name: string }[] },
+    enabled: cloudEnabled,
+  });
+  const anthropicModels = anthropicModelsData?.models ?? [];
+
+  const { data: openrouterModelsData } = useQuery({
+    queryKey: ['config', 'llm-models', 'openrouter', openrouterUseFree],
+    queryFn: async () =>
+      (await configApi.getLlmModels('openrouter', openrouterUseFree)).data as {
+        models: { id: string; name: string; free?: boolean }[];
+      },
+    enabled: openrouterEnabled,
+  });
+  const openrouterModels = openrouterModelsData?.models ?? [];
+
+  const { data: nvidiaModelsData } = useQuery({
+    queryKey: ['config', 'llm-models', 'nvidia'],
+    queryFn: async () => (await configApi.getLlmModels('nvidia')).data as { models: { id: string; name: string }[] },
+    enabled: nvidiaEnabled,
+  });
+  const nvidiaModels = nvidiaModelsData?.models ?? [];
+
+  const { data: geminiModelsData } = useQuery({
+    queryKey: ['config', 'llm-models', 'gemini'],
+    queryFn: async () => (await configApi.getLlmModels('gemini')).data as { models: { id: string; name: string }[] },
+    enabled: geminiEnabled,
+  });
+  const geminiModels = geminiModelsData?.models ?? [];
 
   return (
     <div>
@@ -562,11 +610,26 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
                   onChange={(e) => setGeminiModel(e.target.value)}
                   className="w-full px-3 py-2.5 glass-input"
                 >
-                  <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                  <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                  <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                  <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B</option>
+                  {geminiModels.length > 0
+                    ? (() => {
+                        const ids = new Set(geminiModels.map((m) => m.id));
+                        const opts = geminiModels.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name || m.id}</option>
+                        ));
+                        if (geminiModel && !ids.has(geminiModel)) {
+                          opts.unshift(<option key={geminiModel} value={geminiModel}>{geminiModel} (current)</option>);
+                        }
+                        return opts;
+                      })()
+                    : (
+                        <>
+                          <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                          <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                          <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                          <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                          <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B</option>
+                        </>
+                      )}
                 </select>
               </div>
 
@@ -646,19 +709,57 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
           {openrouterEnabled && (
             <>
               <div>
+                <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">
+                  Use free models or paid?
+                </label>
+                <div className="flex gap-4 mt-1.5">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="openrouter-tier"
+                      checked={!openrouterUseFree}
+                      onChange={() => setOpenrouterUseFree(false)}
+                      className="w-4 h-4 text-blue-600 bg-theme-muted border-slate-600"
+                    />
+                    <span className="text-sm text-theme-primary">Paid (usage-based billing)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="openrouter-tier"
+                      checked={openrouterUseFree}
+                      onChange={() => setOpenrouterUseFree(true)}
+                      className="w-4 h-4 text-blue-600 bg-theme-muted border-slate-600"
+                    />
+                    <span className="text-sm text-theme-primary">Free (no cost, may have rate limits)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
                 <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Model</label>
                 <select
                   value={openrouterModel}
                   onChange={(e) => setOpenrouterModel(e.target.value)}
                   className="w-full px-3 py-2.5 glass-input"
                 >
-                  <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
-                  <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
-                  <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash</option>
-                  <option value="google/gemini-flash-1.5">Gemini 1.5 Flash</option>
-                  <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-                  <option value="openai/gpt-4o">GPT-4o</option>
-                  <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
+                  {openrouterModels.length > 0
+                    ? (() => {
+                        const ids = new Set(openrouterModels.map((m) => m.id));
+                        const opts = openrouterModels.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name || m.id} {m.free ? '(free)' : ''}</option>
+                        ));
+                        if (openrouterModel && !ids.has(openrouterModel)) {
+                          opts.unshift(<option key={openrouterModel} value={openrouterModel}>{openrouterModel} (current)</option>);
+                        }
+                        return opts;
+                      })()
+                    : (
+                        <>
+                          <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                          <option value="openrouter/free">Free Models Router</option>
+                        </>
+                      )}
                 </select>
               </div>
 
@@ -746,10 +847,23 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
                   onChange={(e) => setNvidiaModel(e.target.value)}
                   className="w-full px-3 py-2.5 glass-input"
                 >
-                  <option value="moonshotai/kimi-k2-thinking">Kimi K2 Thinking (reasoning + answer)</option>
-                  <option value="moonshotai/kimi-k2.5">Kimi K2.5 (Moonshot)</option>
-                  <option value="meta/llama-3.3-70b-instruct">Llama 3.3 70B</option>
-                  <option value="mistralai/mixtral-8x22b-instruct">Mixtral 8x22B</option>
+                  {nvidiaModels.length > 0
+                    ? (() => {
+                        const ids = new Set(nvidiaModels.map((m) => m.id));
+                        const opts = nvidiaModels.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name || m.id}</option>
+                        ));
+                        if (nvidiaModel && !ids.has(nvidiaModel)) {
+                          opts.unshift(<option key={nvidiaModel} value={nvidiaModel}>{nvidiaModel} (current)</option>);
+                        }
+                        return opts;
+                      })()
+                    : (
+                        <>
+                          <option value="moonshotai/kimi-k2-thinking">Kimi K2 Thinking (reasoning + answer)</option>
+                          <option value="moonshotai/kimi-k2.5">Kimi K2.5 (Moonshot)</option>
+                        </>
+                      )}
                 </select>
               </div>
 
@@ -835,9 +949,24 @@ function LlmTab({ config, detection }: { config: FullConfig; detection?: Detecti
                   onChange={(e) => setAnthropicModel(e.target.value)}
                   className="w-full px-3 py-2.5 glass-input"
                 >
-                  <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                  <option value="claude-opus-4-5-20251101">Claude Opus 4.5</option>
-                  <option value="claude-3-5-haiku-20241022">Claude Haiku 3.5</option>
+                  {anthropicModels.length > 0
+                    ? (() => {
+                        const ids = new Set(anthropicModels.map((m) => m.id));
+                        const opts = anthropicModels.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name || m.id}</option>
+                        ));
+                        if (anthropicModel && !ids.has(anthropicModel)) {
+                          opts.unshift(<option key={anthropicModel} value={anthropicModel}>{anthropicModel} (current)</option>);
+                        }
+                        return opts;
+                      })()
+                    : (
+                        <>
+                          <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                          <option value="claude-opus-4-5-20251101">Claude Opus 4.5</option>
+                          <option value="claude-3-5-haiku-20241022">Claude Haiku 3.5</option>
+                        </>
+                      )}
                 </select>
               </div>
 
@@ -2132,12 +2261,12 @@ function MemoryTab({ config }: { config: FullConfig }) {
   const [processing, setProcessing] = useState(false);
   const [processResult, setProcessResult] = useState<string | null>(null);
   const [kgEnabled, setKgEnabled] = useState(config.memory?.knowledge_graph_enabled ?? false);
-  const [kgAutoProcess, setKgAutoProcess] = useState(config.memory?.knowledge_graph_auto_process_after_ingest ?? false);
+  const [kgAutoProcess, setKgAutoProcess] = useState(config.memory?.knowledge_graph_auto_process_after_ingest ?? true);
   const [needsRestart, setNeedsRestart] = useState(false);
 
   useEffect(() => {
     setKgEnabled(config.memory?.knowledge_graph_enabled ?? false);
-    setKgAutoProcess(config.memory?.knowledge_graph_auto_process_after_ingest ?? false);
+    setKgAutoProcess(config.memory?.knowledge_graph_auto_process_after_ingest ?? true);
   }, [config]);
 
   const handleProcessGraph = async () => {
@@ -2286,6 +2415,136 @@ function MemoryTab({ config }: { config: FullConfig }) {
             <span className="text-theme-secondary">RAG pipeline</span>
             <StatusBadge ok={true} label="Active" />
           </div>
+        </div>
+      </SectionCard>
+
+      <SaveButton onClick={() => saveMutation.mutate()} loading={saveMutation.isPending} />
+    </div>
+  );
+}
+
+// ── Proactive / Self-healing Tab ────────────────────────────────────────────
+
+const SELF_HEALING_INTERVAL_OPTIONS = [
+  { label: 'Every 1 minute', seconds: 60 },
+  { label: 'Every 5 minutes', seconds: 300 },
+  { label: 'Every 10 minutes', seconds: 600 },
+  { label: 'Every 15 minutes', seconds: 900 },
+  { label: 'Every 30 minutes', seconds: 1800 },
+  { label: 'Every 60 minutes', seconds: 3600 },
+] as const;
+
+function ProactiveTab({ config }: { config: FullConfig }) {
+  const queryClient = useQueryClient();
+  const proactive = config.proactive ?? { self_healing_enabled: false, self_healing_check_interval_seconds: 300 };
+  const [enabled, setEnabled] = useState(proactive.self_healing_enabled);
+  const [intervalSeconds, setIntervalSeconds] = useState(proactive.self_healing_check_interval_seconds);
+  const [saved, setSaved] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<{ fixed?: string[]; detected?: string[]; failed?: string[] } | null>(null);
+
+  useEffect(() => {
+    setEnabled(proactive.self_healing_enabled);
+    setIntervalSeconds(proactive.self_healing_check_interval_seconds);
+  }, [proactive.self_healing_enabled, proactive.self_healing_check_interval_seconds]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      await configApi.updateProactive({
+        self_healing_enabled: enabled,
+        self_healing_check_interval_seconds: intervalSeconds,
+      });
+    },
+    onSuccess: () => {
+      setSaved(true);
+      queryClient.invalidateQueries({ queryKey: ['config'] });
+      setTimeout(() => setSaved(false), 3000);
+    },
+  });
+
+  const handleCheckNow = async () => {
+    setChecking(true);
+    setCheckResult(null);
+    try {
+      const res = await selfHealingApi.checkNow();
+      const result = (res.data as { result?: { fixed?: string[]; detected?: string[]; failed?: string[] } })?.result;
+      setCheckResult(result ?? null);
+    } catch {
+      setCheckResult({ failed: ['Request failed'] });
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div>
+      <TabHeader title="Proactive" subtitle="Self-healing: scan logs and suggest or apply fixes." />
+      {saved && (
+        <div className="mb-5 p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-green-400 text-sm flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4" /> Saved.
+        </div>
+      )}
+
+      <SectionCard title="Self-healing">
+        <div className="space-y-4">
+          <p className="text-xs text-theme-secondary">
+            Self-healing scans log files for errors and can run pattern-based fixes or ask the LLM to suggest fixes (pip install, code edits). By default it is off to avoid using tokens. Enable periodic checks or run a one-time check below.
+          </p>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="rounded border-theme-border bg-theme-bg text-blue-500 focus:ring-blue-500/50"
+            />
+            <span className="text-sm text-theme-primary">Run self-healing periodically</span>
+          </label>
+          {enabled && (
+            <div>
+              <label className="block text-xs text-theme-secondary mb-1.5 uppercase tracking-wider font-medium">Check every</label>
+              <select
+                value={intervalSeconds}
+                onChange={(e) => setIntervalSeconds(Number(e.target.value))}
+                className="w-full px-3 py-2.5 glass-input"
+              >
+                {SELF_HEALING_INTERVAL_OPTIONS.map((opt) => (
+                  <option key={opt.seconds} value={opt.seconds}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Check for errors now">
+        <div className="space-y-3">
+          <p className="text-xs text-theme-secondary">
+            Run a one-time check on all logs up to now. Actions (e.g. pip install, code edits) are applied based on patterns and optional LLM suggestions. This does not start the periodic loop.
+          </p>
+          <button
+            onClick={handleCheckNow}
+            disabled={checking}
+            className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 disabled:opacity-50 text-theme-primary rounded-lg font-medium text-sm transition-all shadow-lg shadow-blue-500/20 flex items-center gap-2"
+          >
+            {checking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Stethoscope className="w-4 h-4" />}
+            {checking ? 'Checking...' : 'Check for errors now'}
+          </button>
+          {checkResult && (
+            <div className="p-3 rounded-lg bg-theme-bg/80 border border-theme-border text-xs space-y-1">
+              {checkResult.fixed?.length ? (
+                <p className="text-green-400"><strong>Fixed:</strong> {checkResult.fixed.join('; ')}</p>
+              ) : null}
+              {checkResult.detected?.length ? (
+                <p className="text-theme-secondary"><strong>Detected:</strong> {checkResult.detected.join('; ')}</p>
+              ) : null}
+              {checkResult.failed?.length ? (
+                <p className="text-red-400"><strong>Failed:</strong> {checkResult.failed.join('; ')}</p>
+              ) : null}
+              {!checkResult.fixed?.length && !checkResult.detected?.length && !checkResult.failed?.length && (
+                <p className="text-theme-secondary">No issues found or no actions taken.</p>
+              )}
+            </div>
+          )}
         </div>
       </SectionCard>
 

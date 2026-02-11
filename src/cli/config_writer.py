@@ -12,6 +12,8 @@ import yaml
 if TYPE_CHECKING:
     from src.cli.wizard import WizardState
 
+from src.cli.steps.llm import NVIDIA_DEFAULT_MODEL
+
 
 class ConfigWriter:
     """Generates configuration files from wizard state."""
@@ -52,7 +54,33 @@ class ConfigWriter:
         )
         written.append(str(sentinel))
 
+        # Reset user data so first-time setup starts fresh (chat history, memory, etc.)
+        self._reset_user_data()
+
         return written
+
+    def _reset_user_data(self) -> None:
+        """Remove persisted chat history, memory, user profiles, and DB so new setup starts fresh."""
+        paths_to_remove = [
+            self.data_dir / "conversations",   # Chat/conversation history
+            self.data_dir / "chromadb",       # Long-term vector memory
+            self.data_dir / "cognee",         # Knowledge graph (cognee)
+            self.data_dir / "user_profiles",  # User names / preferences (first-time intro after setup)
+        ]
+        file_to_remove = self.data_dir / "aria.db"  # SQLite DB (episodic + app state)
+
+        for path in paths_to_remove:
+            if path.exists():
+                try:
+                    shutil.rmtree(path)
+                except OSError:
+                    pass  # Ignore permission or in-use errors
+
+        if file_to_remove.exists():
+            try:
+                file_to_remove.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     # ── settings.yaml ──────────────────────────────────────────────────────
 
@@ -102,7 +130,16 @@ class ConfigWriter:
 
         # memory
         config["memory"] = {
-            "short_term": {"max_messages": 50, "max_tokens": 8000},
+            "short_term": {
+                "max_messages": 50,
+                "max_tokens": 8000,
+                "max_tool_result_chars": 4000,
+                "use_proportional_tool_result": True,
+                "max_tool_result_chars_at_persist": 400_000,
+                "max_turns": 0,
+                "compaction_reserve_tokens": 20_000,
+                "compaction_trigger_tokens": 0,
+            },
             "long_term": {
                 "provider": "chromadb",
                 "persist_directory": "./data/chromadb",
@@ -113,8 +150,11 @@ class ConfigWriter:
             "knowledge_graph": {
                 "enabled": True,
                 "provider": "cognee",
-                "auto_process_after_ingest": False,
+                "auto_process_after_ingest": True,
             },
+            "rag_max_chars": 2500,
+            "rag_head_ratio": 0.7,
+            "rag_tail_ratio": 0.2,
             "user_profiles_enabled": True,
             "entity_extraction_enabled": True,
             "auto_summarize": True,
@@ -156,6 +196,17 @@ class ConfigWriter:
             },
         }
 
+        # orchestrator (more tool iterations = finish more tasks in one turn)
+        config["orchestrator"] = {"max_tool_iterations": 15}
+
+        # workspace (SOUL.md, USER.md, AGENTS.md, IDENTITY.md injected into system prompt)
+        config["workspace"] = {
+            "enabled": True,
+            "path": "./data/workspace",
+            "max_injected_chars": 32_768,
+            "bootstrap_on_first_run": True,
+        }
+
         # onecontext — unified context across all channels
         config["onecontext"] = {
             "enabled": "onecontext" in getattr(s, "enabled_skills", []),
@@ -180,7 +231,7 @@ class ConfigWriter:
             "enabled": local_enabled,
         }
 
-        # Cloud LLM
+        # Cloud LLM (Anthropic)
         cloud_enabled = s.llm_provider in ("anthropic", "hybrid")
         llm["cloud"] = {
             "provider": "anthropic",
@@ -190,7 +241,36 @@ class ConfigWriter:
             "enabled": cloud_enabled,
         }
 
+        # Gemini
+        llm["gemini"] = {
+            "provider": "gemini",
+            "model": getattr(s, "gemini_model", "gemini-2.0-flash"),
+            "max_tokens": 4096,
+            "timeout": 120,
+            "enabled": s.llm_provider == "gemini",
+        }
+
+        # OpenRouter
+        llm["openrouter"] = {
+            "provider": "openrouter",
+            "model": getattr(s, "openrouter_model", "anthropic/claude-3.5-sonnet"),
+            "max_tokens": 4096,
+            "timeout": 120,
+            "enabled": s.llm_provider == "openrouter",
+            "use_free_models": getattr(s, "openrouter_use_free", False),
+        }
+
+        # NVIDIA NIM
+        llm["nvidia"] = {
+            "provider": "nvidia",
+            "model": getattr(s, "nvidia_model", NVIDIA_DEFAULT_MODEL),
+            "max_tokens": 16384,
+            "timeout": 120,
+            "enabled": s.llm_provider == "nvidia",
+        }
+
         # Routing
+        any_cloud = cloud_enabled or s.llm_provider in ("gemini", "openrouter", "nvidia")
         llm["routing"] = {
             "simple_threshold": 50,
             "always_cloud": [
@@ -199,7 +279,7 @@ class ConfigWriter:
                 "skill_creation",
                 "multi_step_planning",
             ],
-            "fallback_to_cloud": cloud_enabled,
+            "fallback_to_cloud": any_cloud,
         }
 
         return llm
@@ -271,7 +351,8 @@ class ConfigWriter:
                 "timeout": 60,
             },
             "browser": {
-                "enabled": "browser" in s.enabled_skills,
+                "enabled": "browser" in s.enabled_skills and s.browser_mode != "none",
+                "mode": getattr(s, "browser_mode", "playwright"),
                 "headless": True,
                 "timeout": 30,
             },
@@ -349,6 +430,22 @@ class ConfigWriter:
             lines.append(f"ANTHROPIC_API_KEY={s.anthropic_api_key}")
         else:
             lines.append("# ANTHROPIC_API_KEY=")
+
+        if getattr(s, "gemini_api_key", None):
+            lines.append(f"GOOGLE_API_KEY={s.gemini_api_key}")
+        elif s.llm_provider == "gemini":
+            lines.append("# GOOGLE_API_KEY= (set for Gemini)")
+
+        if getattr(s, "openrouter_api_key", None):
+            lines.append(f"OPENROUTER_API_KEY={s.openrouter_api_key}")
+        elif s.llm_provider == "openrouter":
+            lines.append("# OPENROUTER_API_KEY= (set for OpenRouter)")
+
+        if getattr(s, "nvidia_api_key", None):
+            lines.append(f"NVIDIA_API_KEY={s.nvidia_api_key}")
+        elif s.llm_provider == "nvidia":
+            lines.append("# NVIDIA_API_KEY= (set for NVIDIA NIM)")
+
         lines.append("")
 
         # Web Dashboard

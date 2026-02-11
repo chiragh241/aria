@@ -238,7 +238,7 @@ export default function Chat() {
                 </div>
               </div>
             )}
-            {/* Aria intro: only show "What should I call you?" when no name; else "Hi [Name], welcome back!" */}
+            {/* First-time: introduce Aria and ask what to call them. After setup = no name = first time. */}
             {history?.length === 0 && (
               <div className="flex gap-3 animate-fade-in justify-start">
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0 mt-1 shadow-md shadow-blue-500/15">
@@ -250,7 +250,7 @@ export default function Chat() {
                       {profile?.name || profile?.preferred_name ? (
                         <>Hi <strong>{profile.name || profile.preferred_name}</strong>, welcome back! What can I help with?</>
                       ) : (
-                        <>Hey — I'm <strong>Aria</strong>. What should I call you, and what can I help with?</>
+                        <>I'm <strong>Aria</strong>, your personal AI. I can help with files, the web, research, and more. What should I call you, and what would you like to do first?</>
                       )}
                     </p>
                   </div>
